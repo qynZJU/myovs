@@ -1,0 +1,2 @@
+configure: add cflags parameters -Wno-cast-align
+lib/netdev_offload_dpdk.c/netdev_offload_dpdk_flow_create: add vlog_info showing whether a flow offload succeddfully
