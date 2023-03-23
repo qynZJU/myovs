@@ -662,8 +662,8 @@ netdev_offload_dpdk_flow_create(struct netdev *netdev,
         }
     } else {
         VLOG_INFO("Flow can't be created %d message: %s\n",
-			       error->type,
-			       error->message ? error->message : "(no stated reason)");
+                   error->type,
+                   error->message ? error->message : "(no stated reason)");
         enum vlog_level level = VLL_WARN;
 
         if (error->type == RTE_FLOW_ERROR_TYPE_ACTION) {
