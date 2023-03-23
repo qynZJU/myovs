@@ -327,6 +327,11 @@ struct ukey_op {
     struct dpif_op dop;           /* Flow operation. */
 };
 
+extern uint64_t flow_create_num;
+extern uint64_t flow_create_fail_num;
+extern uint64_t flow_destroy_num;
+extern uint64_t flow_destroy_fail_num;
+
 static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
 static struct ovs_list all_udpifs = OVS_LIST_INITIALIZER(&all_udpifs);
 
@@ -2652,6 +2657,9 @@ revalidate(struct revalidator *revalidator)
     uint64_t dump_seq, reval_seq;
     bool kill_warn_print = true;
     unsigned int flow_limit;
+
+    VLOG_INFO("already offloading %ld flows (%ld failed), deleting %ld flows (%ld failed), remained %ld flows",
+              flow_create_num, flow_create_fail_num, flow_destroy_num, flow_destroy_fail_num, flow_create_num-flow_destroy_num);
 
     dump_seq = seq_read(udpif->dump_seq);
     reval_seq = seq_read(udpif->reval_seq);
