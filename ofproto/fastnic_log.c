@@ -1,3 +1,4 @@
+#include <config.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -36,12 +37,12 @@ print_log(pthread_t revalidator_thread_id){
 static void
 now_time_log(pthread_t thread_id){
     struct timeval tv;
-    struct tm *tm;
+    struct tm *tzone;
     char datetime[20];
 
     gettimeofday(&tv, NULL);
-    tm = localtime(&tv.tv_sec);
-    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", tm);
+    localtime_r(&tv.tv_sec, &tzone);
+    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", tzone);
     
     VLOG_INFO("thread %ld, start dump at %s",thread_id, datetime);
 }
