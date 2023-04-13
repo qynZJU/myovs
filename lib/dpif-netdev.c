@@ -575,6 +575,7 @@ static void queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
  *
  * 'pmd->ctx.now' should be used without update in all other cases if possible.
  */
+
 static inline void
 pmd_thread_ctx_time_update(struct dp_netdev_pmd_thread *pmd)
 {
@@ -9255,4 +9256,112 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
         *num_lookups_p = lookups_match;
     }
     return false;
+}
+
+
+static struct dp_netdev *
+read_dp_netdevs(void) {
+    struct dp_netdev *dp = NULL;
+    
+    ovs_mutex_lock(&dp_netdev_mutex);
+
+    if (shash_count(&dp_netdevs) == 1) {
+        /* There's only one datapath */
+        dp = shash_first(&dp_netdevs)->data;
+    } else {
+        ovs_mutex_unlock(&dp_netdev_mutex);
+        VLOG_INFO("There are more than one datapath, failed dump stats");
+        return NULL;
+    }
+    ovs_mutex_unlock(&dp_netdev_mutex);
+
+    return dp;
+}
+
+struct dp_netdev_pmd_thread **
+read_pmd_thread(size_t *n){
+    struct dp_netdev *dp = NULL;
+    struct dp_netdev_pmd_thread **pmd_list;
+
+    dp = read_dp_netdevs();
+    if (OVS_UNLIKELY(dp == NULL)){
+        VLOG_INFO("failed to read datapath netdev.");
+    }
+    sorted_poll_thread_list(dp, &pmd_list, n);
+    
+    return pmd_list;
+}
+
+size_t
+read_rxq_list (struct dp_netdev_pmd_thread *pmd, struct rxq_info **rxq_list) {
+    struct rxq_poll *list;
+    struct rxq_info *ret;
+    size_t n_rxq;
+    
+    uint64_t total_cycles = 0;
+    uint64_t busy_cycles = 0;
+    uint64_t total_rxq_proc_cycles = 0;
+
+
+    ovs_mutex_lock(&pmd->port_mutex);
+    
+    sorted_poll_list(pmd, &list, &n_rxq);
+    /* Get the total pmd cycles for an interval. */
+    atomic_read_relaxed(&pmd->intrvl_cycles, &total_cycles);
+    /* Estimate the cycles to cover all intervals. */
+    total_cycles *= PMD_INTERVAL_MAX;
+
+    for (int j = 0; j < PMD_INTERVAL_MAX; j++) {
+        uint64_t cycles;
+
+        atomic_read_relaxed(&pmd->busy_cycles_intrvl[j], &cycles);
+        busy_cycles += cycles;
+    }
+    if (busy_cycles > total_cycles) {
+        busy_cycles = total_cycles;
+    }
+
+    ret = (struct rxq_info *) xmalloc(n_rxq * sizeof(struct rxq_info));
+    for (int i = 0; i < n_rxq; i++) {
+        struct dp_netdev_rxq *rxq = list[i].rxq;
+        const char *name = netdev_rxq_get_name(rxq->rx);
+        uint64_t rxq_proc_cycles = 0;
+
+        for (int j = 0; j < PMD_INTERVAL_MAX; j++) {
+            rxq_proc_cycles += dp_netdev_rxq_get_intrvl_cycles(rxq, j);
+        }
+        total_rxq_proc_cycles += rxq_proc_cycles;
+
+        ret[i].port = name;
+        ret[i].queue_id = netdev_rxq_get_queue_id(list[i].rxq->rx);
+        ret[i].queue_state = netdev_rxq_enabled(list[i].rxq->rx);
+        if (total_cycles) {
+            ret[i].pmd_usage = (double) rxq_proc_cycles / total_cycles;
+        } else {
+            ret[i].pmd_usage = 101.0;
+        }    
+
+        // the parameter meaning is not confirmed, if useful, can add later 
+        // if (n_rxq > 0) {
+        //     ds_put_cstr(reply, "  overhead: ");
+        //     if (total_cycles) {
+        //         uint64_t overhead_cycles = 0;
+
+        //         if (total_rxq_proc_cycles < busy_cycles) {
+        //             overhead_cycles = busy_cycles - total_rxq_proc_cycles;
+        //         }
+        //         ds_put_format(reply, "%2"PRIu64" %%",
+        //                       overhead_cycles * 100 / total_cycles);
+        //     } else {
+        //         ds_put_cstr(reply, "NOT AVAIL");
+        //     }
+        //     ds_put_cstr(reply, "\n");
+        // }
+    }
+
+    ovs_mutex_unlock(&pmd->port_mutex);
+    free(list);
+
+    *rxq_list = ret;
+    return n_rxq;
 }

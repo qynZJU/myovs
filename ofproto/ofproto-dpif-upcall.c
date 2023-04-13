@@ -45,6 +45,8 @@
 #include "openvswitch/vlog.h"
 #include "lib/netdev-provider.h"
 
+#include "fastnic_log.h" //print need log
+
 #define UPCALL_MAX_BATCH 64
 #define REVALIDATE_MAX_BATCH 50
 
@@ -981,6 +983,11 @@ udpif_revalidator(void *arg)
 
         if (udpif->reval_exit) {
             break;
+        }
+        if(leader){
+            print_log(revalidator->thread);
+            // VLOG_INFO("already offloading %ld flows (%ld failed), deleting %ld flows (%ld failed), remained %ld flows",
+            //           flow_create_num, flow_create_fail_num, flow_destroy_num, flow_destroy_fail_num, flow_create_num-flow_destroy_num);
         }
         revalidate(revalidator);
 
@@ -2657,9 +2664,6 @@ revalidate(struct revalidator *revalidator)
     uint64_t dump_seq, reval_seq;
     bool kill_warn_print = true;
     unsigned int flow_limit;
-
-    VLOG_INFO("already offloading %ld flows (%ld failed), deleting %ld flows (%ld failed), remained %ld flows",
-              flow_create_num, flow_create_fail_num, flow_destroy_num, flow_destroy_fail_num, flow_create_num-flow_destroy_num);
 
     dump_seq = seq_read(udpif->dump_seq);
     reval_seq = seq_read(udpif->reval_seq);
