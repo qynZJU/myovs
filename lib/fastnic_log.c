@@ -7,13 +7,12 @@
 #include <sys/time.h>
 
 #include "fastnic_log.h"
-#include "../lib/cmap.h"
-#include "../lib/dpif-netdev.h"
-#include "../lib/dpif-netdev-perf.h"
-#include "../lib/dpif-netdev-private-thread.h"
-#include "openvswitch/thread.h"
+
+#include "cmap.h"
+#include "dpif-netdev.h"
+#include "dpif-netdev-perf.h"
+#include "dpif-netdev-private-thread.h"
 #include "openvswitch/vlog.h"
-#include "openvswitch/shash.h"
 
 #define PKT_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_pkt_stats.csv"
 #define CYCLE_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_cycle_stats.csv"
@@ -25,24 +24,19 @@ static void now_time_log(pthread_t thread_id);
 static void one_pmd_stats(struct dp_netdev_pmd_thread *pmd);
 static void one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd);
 static void pmd_stats_log(void);
-
-int
-print_log(pthread_t revalidator_thread_id){
-    now_time_log(revalidator_thread_id);
-    pmd_stats_log(); 
-
-    return 0;
-}
+static void fastnic_pmd_perf_stats_clear_lock(struct fastnic_pmd_perf_stats *s);
+static void fastnic_pmd_perf_stats_clear(struct fastnic_pmd_perf_stats *s);
+static void fastnic_stats_log(void);
 
 static void
 now_time_log(pthread_t thread_id){
     struct timeval tv;
-    struct tm *tzone;
+    struct tm tzone;
     char datetime[20];
 
     gettimeofday(&tv, NULL);
     localtime_r(&tv.tv_sec, &tzone);
-    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", tzone);
+    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", &tzone);
     
     VLOG_INFO("thread %ld, start dump at %s",thread_id, datetime);
 }
@@ -277,5 +271,97 @@ pmd_stats_log(void){
     }
     free(pmd_list);
 
+}
+
+//change from lib/dpif-netdev-perf.c:pmd_perf_stats_init
+void
+fastnic_pmd_perf_stats_init(struct fastnic_pmd_perf_stats *s)
+{
+    memset(s, 0, sizeof(*s));
+    ovs_mutex_init(&s->stats_mutex);
+    ovs_mutex_init(&s->clear_mutex);
+    
+    s->start_ms = time_msec();
+    // s->log_susp_it = UINT32_MAX;
+    // s->log_begin_it = UINT32_MAX;
+    // s->log_end_it = UINT32_MAX;
+    // s->log_reason = NULL;
+}
+
+//change from lib/dpif-netdev-perf.c:pmd_perf_stats_clear_lock
+static void
+fastnic_pmd_perf_stats_clear_lock(struct fastnic_pmd_perf_stats *s)
+    OVS_REQUIRES(s->stats_mutex)
+{
+    ovs_mutex_lock(&s->clear_mutex);
+    for (int i = 0; i < FASTNIC_PMD_N_STATS; i++) {
+        atomic_read_relaxed(&s->counters.n[i], &s->counters.zero[i]);
+    }
+
+    s->start_ms = time_msec();
+    /* Clearing finished. */
+    s->clear = false;
+    ovs_mutex_unlock(&s->clear_mutex);
+}
+
+
+//change from lib/dpif-netdev-perf.c:pmd_perf_stats_clear
+static void
+fastnic_pmd_perf_stats_clear(struct fastnic_pmd_perf_stats *s)
+{
+    if (ovs_mutex_trylock(&s->stats_mutex) == 0) {
+        /* Locking successful. PMD not polling. */
+        fastnic_pmd_perf_stats_clear_lock(s);
+        ovs_mutex_unlock(&s->stats_mutex);
+    } else {
+        /* Request the polling PMD to clear the stats. There is no need to
+         * block here as stats retrieval is prevented during clearing. */
+        s->clear = true;
+    }
+}
+
+//change from lib/dpif-netdev-perf.c:pmd_perf_start_iteration
+void
+fastnic_pmd_perf_start_iteration(struct fastnic_pmd_perf_stats *s)
+OVS_REQUIRES(s->stats_mutex)
+{
+    if (s->clear) {
+        /* Clear the PMD stats before starting next iteration. */
+        fastnic_pmd_perf_stats_clear_lock(s);
+    }
+}
+
+static void
+fastnic_stats_log(void){
+    struct dp_netdev_pmd_thread **pmd_list;
+    size_t n;
+
+    pmd_list = read_pmd_thread(&n);
+
+    for (size_t i = 0; i < n; i++) {
+        struct dp_netdev_pmd_thread *pmd = pmd_list[i];
+
+        if (!pmd) {
+            break;
+        }
+
+        /* show info*/ //qq 待施工
+        // fastnic_stats(pmd);
+        
+        /* clear stats*/ //qq: use OVS api temporarily
+        fastnic_pmd_perf_stats_clear(&pmd->fastnic_stats);
+
+    }
+    free(pmd_list);
+
+}
+
+int
+print_log(pthread_t revalidator_thread_id){
+    now_time_log(revalidator_thread_id);
+    pmd_stats_log(); 
+    fastnic_stats_log();
+
+    return 0;
 }
 

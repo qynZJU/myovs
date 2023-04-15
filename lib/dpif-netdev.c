@@ -84,6 +84,8 @@
 #include "util.h"
 #include "uuid.h"
 
+#include "fastnic_log.h"
+
 VLOG_DEFINE_THIS_MODULE(dpif_netdev);
 
 /* Auto Load Balancing Defaults */
@@ -2744,6 +2746,8 @@ queue_netdev_flow_put(struct dp_netdev_pmd_thread *pmd,
     offload->orig_in_port = orig_in_port;
 
     dp_netdev_append_flow_offload(offload);
+    
+    fastnic_perf_update_counter(&pmd->fastnic_stats, OFFLOAD_CREATE_PMD, 1);
 }
 
 static void
@@ -6135,6 +6139,7 @@ pmd_thread_main(void *f_)
 {
     struct dp_netdev_pmd_thread *pmd = f_;
     struct pmd_perf_stats *s = &pmd->perf_stats;
+    struct fastnic_pmd_perf_stats *fastnic_s = &pmd->fastnic_stats;
     unsigned int lc = 0;
     struct polled_queue *poll_list;
     bool wait_for_reload = false;
@@ -6194,10 +6199,12 @@ reload:
 
     /* Protect pmd stats from external clearing while polling. */
     ovs_mutex_lock(&pmd->perf_stats.stats_mutex);
+    ovs_mutex_lock(&pmd->fastnic_stats.stats_mutex);
     for (;;) {
         uint64_t rx_packets = 0, tx_packets = 0;
 
         pmd_perf_start_iteration(s);
+        fastnic_pmd_perf_start_iteration(fastnic_s);
 
         atomic_read_relaxed(&pmd->dp->smc_enable_db, &pmd->ctx.smc_enable_db);
 
@@ -6268,6 +6275,7 @@ reload:
         pmd_perf_end_iteration(s, rx_packets, tx_packets,
                                pmd_perf_metrics_enabled(pmd));
     }
+    ovs_mutex_unlock(&pmd->fastnic_stats.stats_mutex);
     ovs_mutex_unlock(&pmd->perf_stats.stats_mutex);
 
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);
@@ -6746,6 +6754,7 @@ dp_netdev_configure_pmd(struct dp_netdev_pmd_thread *pmd, struct dp_netdev *dp,
         pmd_alloc_static_tx_qid(pmd);
     }
     pmd_perf_stats_init(&pmd->perf_stats);
+    fastnic_pmd_perf_stats_init(&pmd->fastnic_stats);
     cmap_insert(&dp->poll_threads, CONST_CAST(struct cmap_node *, &pmd->node),
                 hash_int(core_id, 0));
 }
@@ -9362,6 +9371,6 @@ read_rxq_list (struct dp_netdev_pmd_thread *pmd, struct rxq_info **rxq_list) {
     ovs_mutex_unlock(&pmd->port_mutex);
     free(list);
 
-    *rxq_list = ret;
+    *rxq_list = ret;    
     return n_rxq;
 }

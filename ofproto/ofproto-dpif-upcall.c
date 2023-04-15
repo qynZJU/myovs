@@ -45,7 +45,7 @@
 #include "openvswitch/vlog.h"
 #include "lib/netdev-provider.h"
 
-#include "fastnic_log.h" //print need log
+#include "lib/fastnic_log.h" //print need log
 
 #define UPCALL_MAX_BATCH 64
 #define REVALIDATE_MAX_BATCH 50

@@ -31,7 +31,7 @@ extern "C" {
 
 struct rxq_info
 {
-    char *port;
+    const char *port;
     int queue_id;
     bool queue_state;
     double pmd_usage;
