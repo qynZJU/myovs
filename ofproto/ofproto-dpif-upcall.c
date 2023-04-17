@@ -45,6 +45,8 @@
 #include "openvswitch/vlog.h"
 #include "lib/netdev-provider.h"
 
+#include "lib/fastnic_log.h" //print need log
+
 #define UPCALL_MAX_BATCH 64
 #define REVALIDATE_MAX_BATCH 50
 
@@ -326,6 +328,11 @@ struct ukey_op {
     struct dpif_flow_stats stats; /* Stats for 'op'. */
     struct dpif_op dop;           /* Flow operation. */
 };
+
+extern uint64_t flow_create_num;
+extern uint64_t flow_create_fail_num;
+extern uint64_t flow_destroy_num;
+extern uint64_t flow_destroy_fail_num;
 
 static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
 static struct ovs_list all_udpifs = OVS_LIST_INITIALIZER(&all_udpifs);
@@ -976,6 +983,11 @@ udpif_revalidator(void *arg)
 
         if (udpif->reval_exit) {
             break;
+        }
+        if(leader){
+            print_log(revalidator->thread);
+            // VLOG_INFO("already offloading %ld flows (%ld failed), deleting %ld flows (%ld failed), remained %ld flows",
+            //           flow_create_num, flow_create_fail_num, flow_destroy_num, flow_destroy_fail_num, flow_create_num-flow_destroy_num);
         }
         revalidate(revalidator);
 

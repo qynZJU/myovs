@@ -29,11 +29,22 @@
 extern "C" {
 #endif
 
+struct rxq_info
+{
+    const char *port;
+    int queue_id;
+    bool queue_state;
+    double pmd_usage;
+};
+
 /* Enough headroom to add a vlan tag, plus an extra 2 bytes to allow IP
  * headers to be aligned on a 4-byte boundary.  */
 enum { DP_NETDEV_HEADROOM = 2 + VLAN_HEADER_LEN };
 
 bool dpif_is_netdev(const struct dpif *);
+
+struct dp_netdev_pmd_thread ** read_pmd_thread(size_t *n);
+size_t read_rxq_list (struct dp_netdev_pmd_thread *pmd, struct rxq_info **rxq_list);
 
 #define NR_QUEUE   1
 #define NR_PMD_THREADS 1

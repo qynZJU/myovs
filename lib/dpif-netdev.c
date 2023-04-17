@@ -84,6 +84,8 @@
 #include "util.h"
 #include "uuid.h"
 
+#include "fastnic_log.h"
+
 VLOG_DEFINE_THIS_MODULE(dpif_netdev);
 
 /* Auto Load Balancing Defaults */
@@ -575,6 +577,7 @@ static void queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
  *
  * 'pmd->ctx.now' should be used without update in all other cases if possible.
  */
+
 static inline void
 pmd_thread_ctx_time_update(struct dp_netdev_pmd_thread *pmd)
 {
@@ -2659,7 +2662,12 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
     const char *op;
     int ret;
 
+    if (OVS_UNLIKELY(fastnic_offload_stats.init == false)){
+        fastnic_offload_perf_stats_init(&fastnic_offload_stats);
+    }
+
     for (;;) {
+        fastnic_offload_perf_start_offloaditeration(&fastnic_offload_stats);
         ovs_mutex_lock(&dp_flow_offload.mutex);
         if (ovs_list_is_empty(&dp_flow_offload.list)) {
             ovsrcu_quiesce_start();
@@ -2671,18 +2679,58 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
         offload = CONTAINER_OF(list, struct dp_flow_offload_item, node);
         ovs_mutex_unlock(&dp_flow_offload.mutex);
 
+        uint64_t start, end;
         switch (offload->op) {
         case DP_NETDEV_FLOW_OFFLOAD_OP_ADD:
+            start = cycles_cnt_update();
             op = "add";
             ret = dp_netdev_flow_offload_put(offload);
+            end = cycles_cnt_update();
+            if (ret == 0) {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK, 1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK_CYCLE, end-start);
+                }
+            } else {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL,1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL_CYCLE, end-start);
+                }
+            }
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_MOD:
+            start = cycles_cnt_update();
             op = "modify";
             ret = dp_netdev_flow_offload_put(offload);
+            end = cycles_cnt_update();
+            if (ret == 0) {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK, 1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK_CYCLE, end-start);
+                }
+            } else {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL,1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL_CYCLE, end-start);
+                }
+            }
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_DEL:
+            start = cycles_cnt_update();
             op = "delete";
             ret = dp_netdev_flow_offload_del(offload);
+            end = cycles_cnt_update();
+            if (ret == 0) {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK, 1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK_CYCLE, end-start);
+                }
+            } else {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL,1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL_CYCLE, end-start);
+                }
+            }
             break;
         default:
             OVS_NOT_REACHED();
@@ -2714,6 +2762,8 @@ queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
     offload = dp_netdev_alloc_flow_offload(pmd, flow,
                                            DP_NETDEV_FLOW_OFFLOAD_OP_DEL);
     dp_netdev_append_flow_offload(offload);
+
+    fastnic_perf_update_counter(&pmd->fastnic_stats, OFFLOAD_DEL_PMD, 1);
 }
 
 static void
@@ -2743,6 +2793,8 @@ queue_netdev_flow_put(struct dp_netdev_pmd_thread *pmd,
     offload->orig_in_port = orig_in_port;
 
     dp_netdev_append_flow_offload(offload);
+    
+    fastnic_perf_update_counter(&pmd->fastnic_stats, OFFLOAD_CREATE_PMD, 1);
 }
 
 static void
@@ -6134,6 +6186,7 @@ pmd_thread_main(void *f_)
 {
     struct dp_netdev_pmd_thread *pmd = f_;
     struct pmd_perf_stats *s = &pmd->perf_stats;
+    struct fastnic_pmd_perf_stats *fastnic_s = &pmd->fastnic_stats;
     unsigned int lc = 0;
     struct polled_queue *poll_list;
     bool wait_for_reload = false;
@@ -6193,10 +6246,12 @@ reload:
 
     /* Protect pmd stats from external clearing while polling. */
     ovs_mutex_lock(&pmd->perf_stats.stats_mutex);
+    ovs_mutex_lock(&pmd->fastnic_stats.stats_mutex);
     for (;;) {
         uint64_t rx_packets = 0, tx_packets = 0;
 
         pmd_perf_start_iteration(s);
+        fastnic_pmd_perf_start_pmditeration(fastnic_s);
 
         atomic_read_relaxed(&pmd->dp->smc_enable_db, &pmd->ctx.smc_enable_db);
 
@@ -6267,6 +6322,7 @@ reload:
         pmd_perf_end_iteration(s, rx_packets, tx_packets,
                                pmd_perf_metrics_enabled(pmd));
     }
+    ovs_mutex_unlock(&pmd->fastnic_stats.stats_mutex);
     ovs_mutex_unlock(&pmd->perf_stats.stats_mutex);
 
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);
@@ -6745,6 +6801,7 @@ dp_netdev_configure_pmd(struct dp_netdev_pmd_thread *pmd, struct dp_netdev *dp,
         pmd_alloc_static_tx_qid(pmd);
     }
     pmd_perf_stats_init(&pmd->perf_stats);
+    fastnic_pmd_perf_stats_init(&pmd->fastnic_stats);
     cmap_insert(&dp->poll_threads, CONST_CAST(struct cmap_node *, &pmd->node),
                 hash_int(core_id, 0));
 }
@@ -9255,4 +9312,112 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
         *num_lookups_p = lookups_match;
     }
     return false;
+}
+
+
+static struct dp_netdev *
+read_dp_netdevs(void) {
+    struct dp_netdev *dp = NULL;
+    
+    ovs_mutex_lock(&dp_netdev_mutex);
+
+    if (shash_count(&dp_netdevs) == 1) {
+        /* There's only one datapath */
+        dp = shash_first(&dp_netdevs)->data;
+    } else {
+        ovs_mutex_unlock(&dp_netdev_mutex);
+        VLOG_INFO("There are more than one datapath, failed dump stats");
+        return NULL;
+    }
+    ovs_mutex_unlock(&dp_netdev_mutex);
+
+    return dp;
+}
+
+struct dp_netdev_pmd_thread **
+read_pmd_thread(size_t *n){
+    struct dp_netdev *dp = NULL;
+    struct dp_netdev_pmd_thread **pmd_list;
+
+    dp = read_dp_netdevs();
+    if (OVS_UNLIKELY(dp == NULL)){
+        VLOG_INFO("failed to read datapath netdev.");
+    }
+    sorted_poll_thread_list(dp, &pmd_list, n);
+    
+    return pmd_list;
+}
+
+size_t
+read_rxq_list (struct dp_netdev_pmd_thread *pmd, struct rxq_info **rxq_list) {
+    struct rxq_poll *list;
+    struct rxq_info *ret;
+    size_t n_rxq;
+    
+    uint64_t total_cycles = 0;
+    uint64_t busy_cycles = 0;
+    uint64_t total_rxq_proc_cycles = 0;
+
+
+    ovs_mutex_lock(&pmd->port_mutex);
+    
+    sorted_poll_list(pmd, &list, &n_rxq);
+    /* Get the total pmd cycles for an interval. */
+    atomic_read_relaxed(&pmd->intrvl_cycles, &total_cycles);
+    /* Estimate the cycles to cover all intervals. */
+    total_cycles *= PMD_INTERVAL_MAX;
+
+    for (int j = 0; j < PMD_INTERVAL_MAX; j++) {
+        uint64_t cycles;
+
+        atomic_read_relaxed(&pmd->busy_cycles_intrvl[j], &cycles);
+        busy_cycles += cycles;
+    }
+    if (busy_cycles > total_cycles) {
+        busy_cycles = total_cycles;
+    }
+
+    ret = (struct rxq_info *) xmalloc(n_rxq * sizeof(struct rxq_info));
+    for (int i = 0; i < n_rxq; i++) {
+        struct dp_netdev_rxq *rxq = list[i].rxq;
+        const char *name = netdev_rxq_get_name(rxq->rx);
+        uint64_t rxq_proc_cycles = 0;
+
+        for (int j = 0; j < PMD_INTERVAL_MAX; j++) {
+            rxq_proc_cycles += dp_netdev_rxq_get_intrvl_cycles(rxq, j);
+        }
+        total_rxq_proc_cycles += rxq_proc_cycles;
+
+        ret[i].port = name;
+        ret[i].queue_id = netdev_rxq_get_queue_id(list[i].rxq->rx);
+        ret[i].queue_state = netdev_rxq_enabled(list[i].rxq->rx);
+        if (total_cycles) {
+            ret[i].pmd_usage = (double) rxq_proc_cycles / total_cycles;
+        } else {
+            ret[i].pmd_usage = 101.0;
+        }    
+
+        // the parameter meaning is not confirmed, if useful, can add later 
+        // if (n_rxq > 0) {
+        //     ds_put_cstr(reply, "  overhead: ");
+        //     if (total_cycles) {
+        //         uint64_t overhead_cycles = 0;
+
+        //         if (total_rxq_proc_cycles < busy_cycles) {
+        //             overhead_cycles = busy_cycles - total_rxq_proc_cycles;
+        //         }
+        //         ds_put_format(reply, "%2"PRIu64" %%",
+        //                       overhead_cycles * 100 / total_cycles);
+        //     } else {
+        //         ds_put_cstr(reply, "NOT AVAIL");
+        //     }
+        //     ds_put_cstr(reply, "\n");
+        // }
+    }
+
+    ovs_mutex_unlock(&pmd->port_mutex);
+    free(list);
+
+    *rxq_list = ret;    
+    return n_rxq;
 }

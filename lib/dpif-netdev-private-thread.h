@@ -34,6 +34,8 @@
 #include "dpif-netdev-private-extract.h"
 #include "openvswitch/thread.h"
 
+#include "fastnic_log.h"
+
 #ifdef  __cplusplus
 extern "C" {
 #endif
@@ -208,6 +210,8 @@ struct dp_netdev_pmd_thread {
 
     /* Keep track of detailed PMD performance statistics. */
     struct pmd_perf_stats perf_stats;
+    /* Keep track of more stats fastnic need*/
+    struct fastnic_pmd_perf_stats fastnic_stats;
 
     /* Stats from previous iteration used by automatic pmd
      * load balance logic. */
