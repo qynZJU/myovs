@@ -171,11 +171,6 @@ static const struct rte_eth_conf port_conf = {
     },
 };
 
-uint64_t flow_create_num;
-uint64_t flow_create_fail_num;
-uint64_t flow_destroy_num;
-uint64_t flow_destroy_fail_num;
-
 /*
  * These callbacks allow virtio-net devices to be added to vhost ports when
  * configuration has been fully completed.
@@ -5249,14 +5244,7 @@ netdev_dpdk_rte_flow_destroy(struct netdev *netdev,
     struct netdev_dpdk *dev = netdev_dpdk_cast(netdev);
     int ret;
 
-    ovs_mutex_lock(&dev->mutex);
     ret = rte_flow_destroy(dev->port_id, rte_flow, error);
-    if (ret == 0) {
-        flow_destroy_num++;
-    } else {
-        flow_destroy_fail_num++;
-    }
-    ovs_mutex_unlock(&dev->mutex);
     return ret;
 }
 
@@ -5270,17 +5258,7 @@ netdev_dpdk_rte_flow_create(struct netdev *netdev,
     struct rte_flow *flow;
     struct netdev_dpdk *dev = netdev_dpdk_cast(netdev);
 
-    ovs_mutex_lock(&dev->mutex);
     flow = rte_flow_create(dev->port_id, attr, items, actions, error);
-    if (flow) {
-        flow_create_num++;
-    } else {
-        flow_create_fail_num++;
-        VLOG_INFO("Flow can't be created %d message: %s\n",
-                   error->type,
-                   error->message ? error->message : "(no stated reason)");
-    }
-    ovs_mutex_unlock(&dev->mutex);
     return flow;
 }
 

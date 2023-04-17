@@ -2662,7 +2662,12 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
     const char *op;
     int ret;
 
+    if (OVS_UNLIKELY(fastnic_offload_stats.init == false)){
+        fastnic_offload_perf_stats_init(&fastnic_offload_stats);
+    }
+
     for (;;) {
+        fastnic_offload_perf_start_offloaditeration(&fastnic_offload_stats);
         ovs_mutex_lock(&dp_flow_offload.mutex);
         if (ovs_list_is_empty(&dp_flow_offload.list)) {
             ovsrcu_quiesce_start();
@@ -2674,18 +2679,58 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
         offload = CONTAINER_OF(list, struct dp_flow_offload_item, node);
         ovs_mutex_unlock(&dp_flow_offload.mutex);
 
+        uint64_t start, end;
         switch (offload->op) {
         case DP_NETDEV_FLOW_OFFLOAD_OP_ADD:
+            start = cycles_cnt_update();
             op = "add";
             ret = dp_netdev_flow_offload_put(offload);
+            end = cycles_cnt_update();
+            if (ret == 0) {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK, 1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK_CYCLE, end-start);
+                }
+            } else {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL,1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL_CYCLE, end-start);
+                }
+            }
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_MOD:
+            start = cycles_cnt_update();
             op = "modify";
             ret = dp_netdev_flow_offload_put(offload);
+            end = cycles_cnt_update();
+            if (ret == 0) {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK, 1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK_CYCLE, end-start);
+                }
+            } else {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL,1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL_CYCLE, end-start);
+                }
+            }
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_DEL:
+            start = cycles_cnt_update();
             op = "delete";
             ret = dp_netdev_flow_offload_del(offload);
+            end = cycles_cnt_update();
+            if (ret == 0) {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK, 1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK_CYCLE, end-start);
+                }
+            } else {
+                fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL,1);
+                if (start < end) {
+                    fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL_CYCLE, end-start);
+                }
+            }
             break;
         default:
             OVS_NOT_REACHED();
@@ -2717,6 +2762,8 @@ queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
     offload = dp_netdev_alloc_flow_offload(pmd, flow,
                                            DP_NETDEV_FLOW_OFFLOAD_OP_DEL);
     dp_netdev_append_flow_offload(offload);
+
+    fastnic_perf_update_counter(&pmd->fastnic_stats, OFFLOAD_DEL_PMD, 1);
 }
 
 static void
@@ -6204,7 +6251,7 @@ reload:
         uint64_t rx_packets = 0, tx_packets = 0;
 
         pmd_perf_start_iteration(s);
-        fastnic_pmd_perf_start_iteration(fastnic_s);
+        fastnic_pmd_perf_start_pmditeration(fastnic_s);
 
         atomic_read_relaxed(&pmd->dp->smc_enable_db, &pmd->ctx.smc_enable_db);
 
