@@ -1475,7 +1475,9 @@ fastnic_miniflow_extract(struct dp_packet *packet, struct miniflow *dst, struct 
     #ifdef FASTNIC_OFFLOAD
     if (nw_proto == IPPROTO_TCP || nw_proto == IPPROTO_UDP){
         const struct offload_meta *ofm = data;
-        of_meta->test = ofm->test;   
+        of_meta->flow_size = ofm->flow_size;   
+        of_meta->pkt_seq = ofm->pkt_seq;   
+        of_meta->timestamp = ofm->timestamp;   
     }
     #endif
  out:
