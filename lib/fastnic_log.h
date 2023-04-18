@@ -1,19 +1,19 @@
 #ifndef FASTNIC_LOG_H
 #define FASTNIC_LOG_H 1
 
-//qq 记得改
-#define FASTNIC_PMD_N_STATS 2
-#define FASTNIC_OFFLOAD_N_STATS 5
-
 #include "ovs-atomic.h"
 #include "openvswitch/thread.h"
+
 #ifdef DPDK_NETDEV
 #include <rte_cycles.h>
 #endif
 
+#define FASTNIC_LOG
+
 enum fastnic_pmd_stat_type {
     OFFLOAD_CREATE_PMD, /* call queue_netdev_flow_put */
     OFFLOAD_DEL_PMD,/* call queue_netdev_flow_del */
+    FASTNIC_PMD_N_STATS
 };
 
 struct fastnic_pmd_counters {
@@ -77,7 +77,8 @@ enum fastnic_offload_stat_type {
     OFFLOAD_DEL_RTE_OK, /**/
     OFFLOAD_DEL_RTE_FAIL, /**/
     OFFLOAD_DEL_API_OK_CYCLE, /*  cpu cycle when OFFLOAD_DEL_API_OK. below is the same*/
-    OFFLOAD_DEL_API_FAIL_CYCLE
+    OFFLOAD_DEL_API_FAIL_CYCLE,
+    FASTNIC_OFFLOAD_N_STATS
 };
 
 struct fastnic_offload_counters {

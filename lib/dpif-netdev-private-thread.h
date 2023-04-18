@@ -210,8 +210,10 @@ struct dp_netdev_pmd_thread {
 
     /* Keep track of detailed PMD performance statistics. */
     struct pmd_perf_stats perf_stats;
+    #ifdef FASTNIC_LOG
     /* Keep track of more stats fastnic need*/
     struct fastnic_pmd_perf_stats fastnic_stats;
+    #endif
 
     /* Stats from previous iteration used by automatic pmd
      * load balance logic. */

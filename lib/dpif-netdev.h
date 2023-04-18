@@ -25,6 +25,8 @@
 #include "dp-packet.h"
 #include "packets.h"
 
+#include "fastnic_log.h"
+
 #ifdef  __cplusplus
 extern "C" {
 #endif
@@ -43,8 +45,10 @@ enum { DP_NETDEV_HEADROOM = 2 + VLAN_HEADER_LEN };
 
 bool dpif_is_netdev(const struct dpif *);
 
+#ifdef FASTNIC_LOG
 struct dp_netdev_pmd_thread ** read_pmd_thread(size_t *n);
 size_t read_rxq_list (struct dp_netdev_pmd_thread *pmd, struct rxq_info **rxq_list);
+#endif
 
 #define NR_QUEUE   1
 #define NR_PMD_THREADS 1

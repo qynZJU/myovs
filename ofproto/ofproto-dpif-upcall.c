@@ -984,11 +984,15 @@ udpif_revalidator(void *arg)
         if (udpif->reval_exit) {
             break;
         }
+        
+        #ifdef FASTNIC_LOG
         if(leader){
             print_log(revalidator->thread);
             // VLOG_INFO("already offloading %ld flows (%ld failed), deleting %ld flows (%ld failed), remained %ld flows",
             //           flow_create_num, flow_create_fail_num, flow_destroy_num, flow_destroy_fail_num, flow_create_num-flow_destroy_num);
         }
+        #endif
+
         revalidate(revalidator);
 
         /* Wait for all flows to have been dumped before we garbage collect. */

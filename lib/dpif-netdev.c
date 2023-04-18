@@ -84,8 +84,6 @@
 #include "util.h"
 #include "uuid.h"
 
-#include "fastnic_log.h"
-
 VLOG_DEFINE_THIS_MODULE(dpif_netdev);
 
 /* Auto Load Balancing Defaults */
@@ -2662,12 +2660,16 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
     const char *op;
     int ret;
 
+    #ifdef FASTNIC_LOG
     if (OVS_UNLIKELY(fastnic_offload_stats.init == false)){
         fastnic_offload_perf_stats_init(&fastnic_offload_stats);
     }
+    #endif
 
     for (;;) {
+        #ifdef FASTNIC_LOG
         fastnic_offload_perf_start_offloaditeration(&fastnic_offload_stats);
+        #endif
         ovs_mutex_lock(&dp_flow_offload.mutex);
         if (ovs_list_is_empty(&dp_flow_offload.list)) {
             ovsrcu_quiesce_start();
@@ -2682,6 +2684,7 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
         uint64_t start, end;
         switch (offload->op) {
         case DP_NETDEV_FLOW_OFFLOAD_OP_ADD:
+            #ifdef FASTNIC_LOG
             start = cycles_cnt_update();
             op = "add";
             ret = dp_netdev_flow_offload_put(offload);
@@ -2697,8 +2700,13 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL_CYCLE, end-start);
                 }
             }
+            #else
+            op = "add";
+            ret = dp_netdev_flow_offload_put(offload);
+            #endif
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_MOD:
+            #ifdef FASTNIC_LOG
             start = cycles_cnt_update();
             op = "modify";
             ret = dp_netdev_flow_offload_put(offload);
@@ -2714,8 +2722,13 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL_CYCLE, end-start);
                 }
             }
+            #else
+            op = "modify";
+            ret = dp_netdev_flow_offload_put(offload);
+            #endif
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_DEL:
+            #ifdef FASTNIC_LOG
             start = cycles_cnt_update();
             op = "delete";
             ret = dp_netdev_flow_offload_del(offload);
@@ -2731,6 +2744,10 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL_CYCLE, end-start);
                 }
             }
+            #else
+            op = "delete";
+            ret = dp_netdev_flow_offload_del(offload);
+            #endif
             break;
         default:
             OVS_NOT_REACHED();
@@ -2763,7 +2780,9 @@ queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
                                            DP_NETDEV_FLOW_OFFLOAD_OP_DEL);
     dp_netdev_append_flow_offload(offload);
 
+    #ifdef FASTNIC_LOG
     fastnic_perf_update_counter(&pmd->fastnic_stats, OFFLOAD_DEL_PMD, 1);
+    #endif
 }
 
 static void
@@ -2793,8 +2812,10 @@ queue_netdev_flow_put(struct dp_netdev_pmd_thread *pmd,
     offload->orig_in_port = orig_in_port;
 
     dp_netdev_append_flow_offload(offload);
-    
+
+    #ifdef FASTNIC_LOG
     fastnic_perf_update_counter(&pmd->fastnic_stats, OFFLOAD_CREATE_PMD, 1);
+    #endif
 }
 
 static void
@@ -6251,7 +6272,9 @@ reload:
         uint64_t rx_packets = 0, tx_packets = 0;
 
         pmd_perf_start_iteration(s);
+        #ifdef FASTNIC_LOG
         fastnic_pmd_perf_start_pmditeration(fastnic_s);
+        #endif
 
         atomic_read_relaxed(&pmd->dp->smc_enable_db, &pmd->ctx.smc_enable_db);
 
@@ -6801,7 +6824,9 @@ dp_netdev_configure_pmd(struct dp_netdev_pmd_thread *pmd, struct dp_netdev *dp,
         pmd_alloc_static_tx_qid(pmd);
     }
     pmd_perf_stats_init(&pmd->perf_stats);
+    #ifdef FASTNIC_LOG
     fastnic_pmd_perf_stats_init(&pmd->fastnic_stats);
+    #endif
     cmap_insert(&dp->poll_threads, CONST_CAST(struct cmap_node *, &pmd->node),
                 hash_int(core_id, 0));
 }
@@ -7508,6 +7533,149 @@ dfc_processing(struct dp_netdev_pmd_thread *pmd,
     return dp_packet_batch_size(packets_);
 }
 
+#ifdef FASTNIC_OFFLOAD
+static inline size_t
+fastnic_dfc_processing(struct dp_netdev_pmd_thread *pmd,
+               struct dp_packet_batch *packets_,
+               struct netdev_flow_key *keys,
+               struct netdev_flow_key **missed_keys,
+               struct packet_batch_per_flow batches[], size_t *n_batches,
+               struct dp_packet_flow_map *flow_map,
+               size_t *n_flows, uint8_t *index_map,
+               bool md_is_valid, odp_port_t port_no,
+               struct offload_meta* of_meta)
+{
+    struct netdev_flow_key *key = &keys[0];
+    size_t n_missed = 0, n_emc_hit = 0, n_phwol_hit = 0,  n_mfex_opt_hit = 0;
+    struct dfc_cache *cache = &pmd->flow_cache;
+    struct dp_packet *packet;
+    const size_t cnt = dp_packet_batch_size(packets_);
+    uint32_t cur_min = pmd->ctx.emc_insert_min;
+    const uint32_t recirc_depth = *recirc_depth_get();
+    const bool netdev_flow_api = netdev_is_flow_api_enabled();
+    int i;
+    uint16_t tcp_flags;
+    size_t map_cnt = 0;
+    bool batch_enable = true;
+
+    pmd_perf_update_counter(&pmd->perf_stats,
+                            md_is_valid ? PMD_STAT_RECIRC : PMD_STAT_RECV,
+                            cnt);
+
+    DP_PACKET_BATCH_REFILL_FOR_EACH (i, cnt, packet, packets_) {
+        struct dp_netdev_flow *flow;
+
+        if (OVS_UNLIKELY(dp_packet_size(packet) < ETH_HEADER_LEN)) {
+            dp_packet_delete(packet);
+            COVERAGE_INC(datapath_drop_rx_invalid_packet);
+            continue;
+        }
+
+        if (i != cnt - 1) {
+            struct dp_packet **packets = packets_->packets;
+            /* Prefetch next packet data and metadata. */
+            OVS_PREFETCH(dp_packet_data(packets[i+1]));
+            pkt_metadata_prefetch_init(&packets[i+1]->md);
+        }
+
+        if (!md_is_valid) {
+            pkt_metadata_init(&packet->md, port_no);
+        }
+
+        if (netdev_flow_api && recirc_depth == 0) {
+            if (OVS_UNLIKELY(dp_netdev_hw_flow(pmd, port_no, packet, &flow))) {
+                /* Packet restoration failed and it was dropped, do not
+                 * continue processing.
+                 */
+                continue;
+            }
+            if (OVS_LIKELY(flow)) {
+                tcp_flags = parse_tcp_flags(packet);
+                n_phwol_hit++;
+                if (OVS_LIKELY(batch_enable)) {
+                    dp_netdev_queue_batches(packet, flow, tcp_flags, batches,
+                                            n_batches);
+                } else {
+                    /* Flow batching should be performed only after fast-path
+                     * processing is also completed for packets with emc miss
+                     * or else it will result in reordering of packets with
+                     * same datapath flows. */
+                    packet_enqueue_to_flow_map(packet, flow, tcp_flags,
+                                               flow_map, map_cnt++);
+                }
+                continue;
+            }
+        }
+        
+        #ifdef FASTNIC_OFFLOAD
+        fastnic_miniflow_extract(packet, &key->mf, of_meta);
+        #else
+        miniflow_extract(packet, &key->mf);
+        #endif
+        key->len = 0; /* Not computed yet. */
+        key->hash =
+                (md_is_valid == false)
+                ? dpif_netdev_packet_get_rss_hash_orig_pkt(packet, &key->mf)
+                : dpif_netdev_packet_get_rss_hash(packet, &key->mf);
+
+        /* If EMC is disabled skip emc_lookup */
+        flow = (cur_min != 0) ? emc_lookup(&cache->emc_cache, key) : NULL;
+        if (OVS_LIKELY(flow)) {
+            tcp_flags = miniflow_get_tcp_flags(&key->mf);
+            n_emc_hit++;
+            if (OVS_LIKELY(batch_enable)) {
+                dp_netdev_queue_batches(packet, flow, tcp_flags, batches,
+                                        n_batches);
+            } else {
+                /* Flow batching should be performed only after fast-path
+                 * processing is also completed for packets with emc miss
+                 * or else it will result in reordering of packets with
+                 * same datapath flows. */
+                packet_enqueue_to_flow_map(packet, flow, tcp_flags,
+                                           flow_map, map_cnt++);
+            }
+        } else {
+            /* Exact match cache missed. Group missed packets together at
+             * the beginning of the 'packets' array. */
+            dp_packet_batch_refill(packets_, packet, i);
+
+            /* Preserve the order of packet for flow batching. */
+            index_map[n_missed] = map_cnt;
+            flow_map[map_cnt++].flow = NULL;
+
+            /* 'key[n_missed]' contains the key of the current packet and it
+             * will be passed to SMC lookup. The next key should be extracted
+             * to 'keys[n_missed + 1]'.
+             * We also maintain a pointer array to keys missed both SMC and EMC
+             * which will be returned to the caller for future processing. */
+            missed_keys[n_missed] = key;
+            key = &keys[++n_missed];
+
+            /* Skip batching for subsequent packets to avoid reordering. */
+            batch_enable = false;
+        }
+    }
+    /* Count of packets which are not flow batched. */
+    *n_flows = map_cnt;
+
+    pmd_perf_update_counter(&pmd->perf_stats, PMD_STAT_PHWOL_HIT, n_phwol_hit);
+    pmd_perf_update_counter(&pmd->perf_stats, PMD_STAT_MFEX_OPT_HIT,
+                            n_mfex_opt_hit);
+    pmd_perf_update_counter(&pmd->perf_stats, PMD_STAT_EXACT_HIT, n_emc_hit);
+
+    if (!pmd->ctx.smc_enable_db) {
+        return dp_packet_batch_size(packets_);
+    }
+
+    /* Packets miss EMC will do a batch lookup in SMC if enabled */
+    smc_lookup_batch(pmd, keys, missed_keys, packets_,
+                     n_missed, flow_map, index_map);
+
+    return dp_packet_batch_size(packets_);
+}
+#endif
+
+
 static inline int
 handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
                      struct dp_packet *packet,
@@ -7587,6 +7755,89 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
     }
     return error;
 }
+
+#ifdef FASTNIC_OFFLOAD
+static inline int
+fastnic_handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
+                     struct dp_packet *packet,
+                     const struct netdev_flow_key *key,
+                     struct ofpbuf *actions, struct ofpbuf *put_actions,
+                     struct offload_meta *of_meta)
+{
+    struct ofpbuf *add_actions;
+    struct dp_packet_batch b;
+    struct match match;
+    ovs_u128 ufid;
+    int error;
+    uint64_t cycles = cycles_counter_update(&pmd->perf_stats);
+    odp_port_t orig_in_port = packet->md.orig_in_port;
+
+    match.tun_md.valid = false;
+    miniflow_expand(&key->mf, &match.flow);
+    memset(&match.wc, 0, sizeof match.wc);
+
+    ofpbuf_clear(actions);
+    ofpbuf_clear(put_actions);
+
+    odp_flow_key_hash(&match.flow, sizeof match.flow, &ufid);
+    error = dp_netdev_upcall(pmd, packet, &match.flow, &match.wc,
+                             &ufid, DPIF_UC_MISS, NULL, actions,
+                             put_actions);
+    if (OVS_UNLIKELY(error && error != ENOSPC)) {
+        dp_packet_delete(packet);
+        COVERAGE_INC(datapath_drop_upcall_error);
+        return error;
+    }
+
+    /* The Netlink encoding of datapath flow keys cannot express
+     * wildcarding the presence of a VLAN tag. Instead, a missing VLAN
+     * tag is interpreted as exact match on the fact that there is no
+     * VLAN.  Unless we refactor a lot of code that translates between
+     * Netlink and struct flow representations, we have to do the same
+     * here.  This must be in sync with 'match' in dpif_netdev_flow_put(). */
+    if (!match.wc.masks.vlans[0].tci) {
+        match.wc.masks.vlans[0].tci = htons(0xffff);
+    }
+
+    /* We can't allow the packet batching in the next loop to execute
+     * the actions.  Otherwise, if there are any slow path actions,
+     * we'll send the packet up twice. */
+    dp_packet_batch_init_packet(&b, packet);
+    dp_netdev_execute_actions(pmd, &b, true, &match.flow,
+                              actions->data, actions->size);
+
+    add_actions = put_actions->size ? put_actions : actions;
+    if (OVS_LIKELY(error != ENOSPC)) {
+        struct dp_netdev_flow *netdev_flow;
+
+        /* XXX: There's a race window where a flow covering this packet
+         * could have already been installed since we last did the flow
+         * lookup before upcall.  This could be solved by moving the
+         * mutex lock outside the loop, but that's an awful long time
+         * to be locking revalidators out of making flow modifications. */
+        ovs_mutex_lock(&pmd->flow_mutex);
+        netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL);
+        if (OVS_LIKELY(!netdev_flow)) {
+            netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid,
+                                             add_actions->data,
+                                             add_actions->size, orig_in_port);
+        }
+        ovs_mutex_unlock(&pmd->flow_mutex);
+        uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
+        smc_insert(pmd, key, hash);
+        emc_probabilistic_insert(pmd, key, netdev_flow);
+    }
+    if (pmd_perf_metrics_enabled(pmd)) {
+        /* Update upcall stats. */
+        cycles = cycles_counter_update(&pmd->perf_stats) - cycles;
+        struct pmd_perf_stats *s = &pmd->perf_stats;
+        s->current.upcalls++;
+        s->current.upcall_cycles += cycles;
+        histogram_add_sample(&s->cycles_per_upcall, cycles);
+    }
+    return error;
+}
+#endif
 
 static inline void
 fast_path_processing(struct dp_netdev_pmd_thread *pmd,
@@ -7705,6 +7956,130 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
                             upcall_fail_cnt);
 }
 
+#ifdef FASTNIC_OFFLOAD
+static inline void
+fastnic_fast_path_processing(struct dp_netdev_pmd_thread *pmd,
+                     struct dp_packet_batch *packets_,
+                     struct netdev_flow_key **keys,
+                     struct dp_packet_flow_map *flow_map,
+                     uint8_t *index_map, odp_port_t in_port,
+                     struct offload_meta* of_meta)
+{
+    const size_t cnt = dp_packet_batch_size(packets_);
+#if !defined(__CHECKER__) && !defined(_WIN32)
+    const size_t PKT_ARRAY_SIZE = cnt;
+#else
+    /* Sparse or MSVC doesn't like variable length array. */
+    enum { PKT_ARRAY_SIZE = NETDEV_MAX_BURST };
+#endif
+    struct dp_packet *packet;
+    struct dpcls *cls;
+    struct dpcls_rule *rules[PKT_ARRAY_SIZE];
+    struct dp_netdev *dp = pmd->dp;
+    int upcall_ok_cnt = 0, upcall_fail_cnt = 0;
+    int lookup_cnt = 0, add_lookup_cnt;
+    bool any_miss;
+
+    for (size_t i = 0; i < cnt; i++) {
+        /* Key length is needed in all the cases, hash computed on demand. */
+        keys[i]->len = netdev_flow_key_size(miniflow_n_values(&keys[i]->mf));
+    }
+    /* Get the classifier for the in_port */
+    cls = dp_netdev_pmd_lookup_dpcls(pmd, in_port);
+    if (OVS_LIKELY(cls)) {
+        any_miss = !dpcls_lookup(cls, (const struct netdev_flow_key **)keys,
+                                rules, cnt, &lookup_cnt);
+    } else {
+        any_miss = true;
+        memset(rules, 0, sizeof(rules));
+    }
+    if (OVS_UNLIKELY(any_miss) && !fat_rwlock_tryrdlock(&dp->upcall_rwlock)) {
+        uint64_t actions_stub[512 / 8], slow_stub[512 / 8];
+        struct ofpbuf actions, put_actions;
+
+        ofpbuf_use_stub(&actions, actions_stub, sizeof actions_stub);
+        ofpbuf_use_stub(&put_actions, slow_stub, sizeof slow_stub);
+
+        DP_PACKET_BATCH_FOR_EACH (i, packet, packets_) {
+            struct dp_netdev_flow *netdev_flow;
+
+            if (OVS_LIKELY(rules[i])) {
+                continue;
+            }
+
+            /* It's possible that an earlier slow path execution installed
+             * a rule covering this flow.  In this case, it's a lot cheaper
+             * to catch it here than execute a miss. */
+            netdev_flow = dp_netdev_pmd_lookup_flow(pmd, keys[i],
+                                                    &add_lookup_cnt);
+            if (netdev_flow) {
+                lookup_cnt += add_lookup_cnt;
+                rules[i] = &netdev_flow->cr;
+                continue;
+            }
+
+            #ifdef FASTNIC_OFFLOAD
+            int error = fastnic_handle_packet_upcall(pmd, packet, keys[i],
+                                             &actions, &put_actions,of_meta);
+            #else
+            int error = handle_packet_upcall(pmd, packet, keys[i],
+                                             &actions, &put_actions);
+            #endif
+
+            if (OVS_UNLIKELY(error)) {
+                upcall_fail_cnt++;
+            } else {
+                upcall_ok_cnt++;
+            }
+        }
+
+        ofpbuf_uninit(&actions);
+        ofpbuf_uninit(&put_actions);
+        fat_rwlock_unlock(&dp->upcall_rwlock);
+    } else if (OVS_UNLIKELY(any_miss)) {
+        DP_PACKET_BATCH_FOR_EACH (i, packet, packets_) {
+            if (OVS_UNLIKELY(!rules[i])) {
+                dp_packet_delete(packet);
+                COVERAGE_INC(datapath_drop_lock_error);
+                upcall_fail_cnt++;
+            }
+        }
+    }
+
+    DP_PACKET_BATCH_FOR_EACH (i, packet, packets_) {
+        struct dp_netdev_flow *flow;
+        /* Get the original order of this packet in received batch. */
+        int recv_idx = index_map[i];
+        uint16_t tcp_flags;
+
+        if (OVS_UNLIKELY(!rules[i])) {
+            continue;
+        }
+
+        flow = dp_netdev_flow_cast(rules[i]);
+        uint32_t hash =  dp_netdev_flow_hash(&flow->ufid);
+        smc_insert(pmd, keys[i], hash);
+
+        emc_probabilistic_insert(pmd, keys[i], flow);
+        /* Add these packets into the flow map in the same order
+         * as received.
+         */
+        tcp_flags = miniflow_get_tcp_flags(&keys[i]->mf);
+        packet_enqueue_to_flow_map(packet, flow, tcp_flags,
+                                   flow_map, recv_idx);
+    }
+
+    pmd_perf_update_counter(&pmd->perf_stats, PMD_STAT_MASKED_HIT,
+                            cnt - upcall_ok_cnt - upcall_fail_cnt);
+    pmd_perf_update_counter(&pmd->perf_stats, PMD_STAT_MASKED_LOOKUP,
+                            lookup_cnt);
+    pmd_perf_update_counter(&pmd->perf_stats, PMD_STAT_MISS,
+                            upcall_ok_cnt);
+    pmd_perf_update_counter(&pmd->perf_stats, PMD_STAT_LOST,
+                            upcall_fail_cnt);
+}
+#endif
+
 /* Packets enter the datapath from a port (or from recirculation) here.
  *
  * When 'md_is_valid' is true the metadata in 'packets' are already valid.
@@ -7732,14 +8107,25 @@ dp_netdev_input__(struct dp_netdev_pmd_thread *pmd,
     odp_port_t in_port;
 
     n_batches = 0;
+    #ifdef FASTNIC_OFFLOAD
+    struct offload_meta of_meta;
+    fastnic_dfc_processing(pmd, packets, keys, missed_keys, batches, &n_batches,
+                   flow_map, &n_flows, index_map, md_is_valid, port_no, &of_meta);
+    #else
     dfc_processing(pmd, packets, keys, missed_keys, batches, &n_batches,
                    flow_map, &n_flows, index_map, md_is_valid, port_no);
+    #endif
 
     if (!dp_packet_batch_is_empty(packets)) {
         /* Get ingress port from first packet's metadata. */
         in_port = packets->packets[0]->md.in_port.odp_port;
+        #ifdef FASTNIC_OFFLOAD
+        fastnic_fast_path_processing(pmd, packets, missed_keys,
+                             flow_map, index_map, in_port,&of_meta);
+        #else
         fast_path_processing(pmd, packets, missed_keys,
                              flow_map, index_map, in_port);
+        #endif
     }
 
     /* Batch rest of packets which are in flow map. */
@@ -9314,7 +9700,7 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
     return false;
 }
 
-
+#ifdef FASTNIC_LOG
 static struct dp_netdev *
 read_dp_netdevs(void) {
     struct dp_netdev *dp = NULL;
@@ -9421,3 +9807,4 @@ read_rxq_list (struct dp_netdev_pmd_thread *pmd, struct rxq_info **rxq_list) {
     *rxq_list = ret;    
     return n_rxq;
 }
+#endif
