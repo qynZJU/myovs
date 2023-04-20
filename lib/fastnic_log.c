@@ -16,7 +16,7 @@
 
 #define PKT_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_pkt_stats.csv"
 #define CYCLE_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_cycle_stats.csv"
-#define RXQ_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/rxq_stats.csv"
+#define RXQ_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_rxq_stats.csv"
 #define FASTNIC_PMD_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_pmd_stats.csv"
 #define FASTNIC_ALL_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_all_stats.csv"
 
@@ -62,6 +62,8 @@ static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_s
     } else {
         val = 0;
     }
+
+    return val;
 }
 
 // change from lib/dpif-netdev.c:pmd_info_show_stats
