@@ -51,7 +51,7 @@ now_time_log(pthread_t thread_id){
     localtime_r(&tv.tv_sec, &tzone);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", &tzone);
     
-    VLOG_INFO("thread %ld, start dump at %s, accurate time as ",thread_id, datetime, tv.tv_sec, tv.tv_usec);
+    VLOG_INFO("thread %ld, start dump at %s, accurate time as %lds-%ldus",thread_id, datetime, tv.tv_sec, tv.tv_usec);
 }
 
 static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_stat_type counter) {
