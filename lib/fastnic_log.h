@@ -30,7 +30,8 @@ struct fastnic_pmd_perf_stats{
     struct ovs_mutex clear_mutex;
 
     /* Start of the current performance measurement period. */
-    uint64_t start_ms;
+    //uint64_t start_ms;
+    struct timeval start_t;
     /* counter of performance measurement periods since the program run*/
     uint64_t measure_cnt;    
 
@@ -96,7 +97,8 @@ struct fastnic_offload_perf_stats{
     struct ovs_mutex clear_mutex;
 
     /* Start of the current performance measurement period. */
-    uint64_t start_ms;
+    //uint64_t start_ms;
+    struct timeval start_t;
     /* counter of performance measurement periods since the program run*/
     uint64_t measure_cnt;    
     

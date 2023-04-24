@@ -79,9 +79,11 @@ one_pmd_sta(struct dp_netdev_pmd_thread *pmd)
     const char pkt_stats_file[100] = PKT_STATS_FILE;
     const char cycle_stats_file[100] = CYCLE_STATS_FILE;
     struct timeval tv;
+    uint64_t time_interval;
     FILE *fp = NULL;
     
     gettimeofday(&tv, NULL);
+    time_interval = (tv.tv_sec - pmd->fastnic_stats.start_t.tv_sec)*1000 + (tv.tv_usec - pmd->fastnic_stats.start_t.tv_usec)/1000; //accurate to millisecond
 
     pmd_perf_read_counters(&pmd->perf_stats, stats);
     
@@ -105,7 +107,7 @@ one_pmd_sta(struct dp_netdev_pmd_thread *pmd)
     /* stats of packets*/
     if (unlikely(access(pkt_stats_file, 0) != 0)) {
         fp = fopen(pkt_stats_file, "a+");
-        fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,\
+        fprintf(fp, "measure_cnt,timestamp,interval/ms,dimension,numa_id,core_id,\
                     rcv_pkts,rcircu_pkts,PHWOL_pkts,MFEX_pkts,EMC_pkts,SMC_pkts,\
                     MEGA_pkts,UPCALLS_pkts,UPCALLF_pkts,\
                     avgpkt_batch,passes_per_pkt,megalookup_num\r\n");
@@ -118,6 +120,7 @@ one_pmd_sta(struct dp_netdev_pmd_thread *pmd)
 
     fprintf(fp, "%"PRIu64",", pmd->fastnic_stats.measure_cnt);
     fprintf(fp, "%ld,", tv.tv_sec);
+    fprintf(fp, "%"PRIu64",", time_interval);
     fprintf(fp, ((pmd->core_id == NON_PMD_CORE_ID) ? "all," : "pmd,"));//dimension 
     fprintf(fp, "%d,", pmd->numa_id);
     fprintf(fp, "%u,", pmd->core_id);
@@ -187,14 +190,18 @@ one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd)
 
         const char rxq_stats_file[100] = RXQ_STATS_FILE;
         struct timeval tv;
+        uint64_t time_interval;
         FILE *fp = NULL;
 
         gettimeofday(&tv, NULL);
+        time_interval = (tv.tv_sec - pmd->fastnic_stats.start_t.tv_sec)*1000 + (tv.tv_usec - pmd->fastnic_stats.start_t.tv_usec)/1000; //accurate to millisecond
+        
+        n_rxq = read_rxq_list (pmd, &rxq_list);
 
         /* stats of rxq*/
         if (unlikely(access(rxq_stats_file, 0) != 0)) {
             fp = fopen(rxq_stats_file, "a+");
-            fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,\
+            fprintf(fp, "measure_cnt,timestamp,interval/ms,dimension,numa_id,core_id,\
                         isolated,port,queue_id,queue_state,pmd_usage\r\n");
         } else {
             fp = fopen(rxq_stats_file, "a+");
@@ -203,11 +210,10 @@ one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd)
             VLOG_INFO("can not open file %s", rxq_stats_file);
         }
         
-        n_rxq = read_rxq_list (pmd, &rxq_list);
-
         for (int i = 0; i < n_rxq; i++) {
             fprintf(fp, "%"PRIu64",", pmd->fastnic_stats.measure_cnt);
             fprintf(fp, "%ld,", tv.tv_sec);
+            fprintf(fp, "%"PRIu64",", time_interval);
             fprintf(fp, ((pmd->core_id == NON_PMD_CORE_ID) ? "all," : "pmd,"));//dimension 
             fprintf(fp, "%d,", pmd->numa_id);
             fprintf(fp, "%u,", pmd->core_id);
@@ -319,7 +325,8 @@ fastnic_pmd_perf_stats_init(struct fastnic_pmd_perf_stats *s)
     ovs_mutex_init(&s->stats_mutex);
     ovs_mutex_init(&s->clear_mutex);
     
-    s->start_ms = time_msec();
+    // s->start_ms = time_msec();
+    gettimeofday(&s->start_t, NULL);
     s->measure_cnt = 0;
     // s->log_susp_it = UINT32_MAX;
     // s->log_begin_it = UINT32_MAX;
@@ -337,7 +344,8 @@ fastnic_pmd_perf_stats_clear_lock(struct fastnic_pmd_perf_stats *s)
         atomic_read_relaxed(&s->counters.n[i], &s->counters.zero[i]);
     }
 
-    s->start_ms = time_msec();
+    // s->start_ms = time_msec();
+    gettimeofday(&s->start_t, NULL);
     /* Clearing finished. */
     s->clear = false;
     ovs_mutex_unlock(&s->clear_mutex);
@@ -401,7 +409,8 @@ fastnic_offload_perf_stats_init(struct fastnic_offload_perf_stats *s)
     ovs_mutex_init(&s->stats_mutex);
     ovs_mutex_init(&s->clear_mutex);
     
-    s->start_ms = time_msec();
+    // s->start_ms = time_msec();
+    gettimeofday(&s->start_t, NULL);
     s->measure_cnt = 0;
 }
 
@@ -415,7 +424,8 @@ fastnic_offload_perf_stats_clear_lock(struct fastnic_offload_perf_stats *s)
         atomic_read_relaxed(&s->counters.n[i], &s->counters.zero[i]);
     }
 
-    s->start_ms = time_msec();
+    // s->start_ms = time_msec();
+    gettimeofday(&s->start_t, NULL);
     /* Clearing finished. */
     s->clear = false;
     ovs_mutex_unlock(&s->clear_mutex);
@@ -477,15 +487,18 @@ fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd)
     uint64_t stats_pmd[FASTNIC_PMD_N_STATS];
     const char fastnic_pmd_stats_file[100] = FASTNIC_PMD_STATS_FILE;
     struct timeval tv;
+    uint64_t time_interval;
     FILE *fp = NULL;
     
     gettimeofday(&tv, NULL);
+    time_interval = (tv.tv_sec - pmd->fastnic_stats.start_t.tv_sec)*1000 + (tv.tv_usec - pmd->fastnic_stats.start_t.tv_usec)/1000; //accurate to millisecond
+
 
     fastnic_pmd_perf_read_counters(&pmd->fastnic_stats, stats_pmd);
     
     if (unlikely(access(fastnic_pmd_stats_file, 0) != 0)) {
         fp = fopen(fastnic_pmd_stats_file, "a+");
-        fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,\
+        fprintf(fp, "measure_cnt,timestamp,interval/ms,dimension,numa_id,core_id,\
                     offload_create_pmd,offload_del_pmd\r\n");
     } else {
         fp = fopen(fastnic_pmd_stats_file, "a+");
@@ -496,7 +509,8 @@ fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd)
 
     fprintf(fp, "%"PRIu64",", pmd->fastnic_stats.measure_cnt);
     fprintf(fp, "%ld,", tv.tv_sec);
-    fprintf(fp, "pmd,");//dimension 
+    fprintf(fp, "%"PRIu64",", time_interval);
+    fprintf(fp, ((pmd->core_id == NON_PMD_CORE_ID) ? "all," : "pmd,"));//dimension 
     fprintf(fp, "%d,", pmd->numa_id);
     fprintf(fp, "%u,", pmd->core_id);
     fprintf(fp, "%"PRIu64",", stats_pmd[OFFLOAD_CREATE_PMD]); /* call queue_netdev_flow_put */
@@ -511,15 +525,17 @@ fastnic_offload_sta(void)
     uint64_t stats_offload[FASTNIC_OFFLOAD_N_STATS];
     const char fastnic_offload_stats_file[100] = FASTNIC_OFFLOAD_STATS_FILE;
     struct timeval tv;
+    uint64_t time_interval;
     FILE *fp = NULL;
     
     gettimeofday(&tv, NULL);
+    time_interval = (tv.tv_sec - fastnic_offload_stats.start_t.tv_sec)*1000 + (tv.tv_usec - fastnic_offload_stats.start_t.tv_usec)/1000; //accurate to millisecond
 
     fastnic_offload_perf_read_counters(&fastnic_offload_stats, stats_offload);
     
     if (unlikely(access(fastnic_offload_stats_file, 0) != 0)) {
         fp = fopen(fastnic_offload_stats_file, "a+");
-        fprintf(fp, "offload_measure_cnt,timestamp,\
+        fprintf(fp, "offload_measure_cnt,timestamp,interval,\
                     put_ok,put_fail,mod_ok,mod_fail,rte_create_ok,rte_create_fail,\
                     del_ok,del_fail,rte_del_ok,rte_del_fail\
                     put_ok_cycle,put_fail_cycle,mod_ok_cycle,mod_fail_cycle\
@@ -556,7 +572,7 @@ fastnic_offload_sta(void)
 
     fprintf(fp, "%"PRIu64",", fastnic_offload_stats.measure_cnt);
     fprintf(fp, "%ld,", tv.tv_sec);
-
+    fprintf(fp, "%"PRIu64",", time_interval);
     fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_PUT_OK]); 
     fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_PUT_FAIL]); 
     fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_MOD_OK]); 
