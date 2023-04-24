@@ -18,7 +18,7 @@
 #define CYCLE_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_cycle_stats.csv"
 #define RXQ_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_rxq_stats.csv"
 #define FASTNIC_PMD_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_pmd_stats.csv"
-#define FASTNIC_ALL_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_all_stats.csv"
+#define FASTNIC_OFFLOAD_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_ol_stats.csv"
 
 VLOG_DEFINE_THIS_MODULE(fastnic_log);
 
@@ -28,7 +28,7 @@ struct fastnic_offload_perf_stats fastnic_offload_stats = {
 
 static void now_time_log(pthread_t thread_id);
 static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_stat_type counter);
-static void one_pmd_stats(struct dp_netdev_pmd_thread *pmd);
+static void one_pmd_sta(struct dp_netdev_pmd_thread *pmd);
 static void one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd);
 // static void pmd_stats_log(void);
 static void fastnic_pmd_perf_stats_clear_lock(struct fastnic_pmd_perf_stats *s);
@@ -37,7 +37,8 @@ static void fastnic_pmd_perf_read_counters(const struct fastnic_pmd_perf_stats *
 static void fastnic_offload_perf_stats_clear_lock(struct fastnic_offload_perf_stats *s);
 static void fastnic_offload_perf_stats_clear(struct fastnic_offload_perf_stats *s);
 static void fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s, uint64_t stats[FASTNIC_OFFLOAD_N_STATS]);
-static void fastnic_stats(struct dp_netdev_pmd_thread *pmd);
+static void fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd);
+static void fastnic_offload_sta(void);
 // static void fastnic_stats_log(void);
 
 static void
@@ -68,7 +69,7 @@ static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_s
 
 // change from lib/dpif-netdev.c:pmd_info_show_stats
 static void
-one_pmd_stats(struct dp_netdev_pmd_thread *pmd) 
+one_pmd_sta(struct dp_netdev_pmd_thread *pmd) 
 {
     uint64_t stats[PMD_N_STATS];
     uint64_t total_cycles, total_packets;
@@ -471,114 +472,112 @@ fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s,
 
 // change from lib/dpif-netdev.c:pmd_info_show_stats
 static void
-fastnic_stats(struct dp_netdev_pmd_thread *pmd) 
+fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd) 
 {
     uint64_t stats_pmd[FASTNIC_PMD_N_STATS];
-    uint64_t stats_offload[FASTNIC_OFFLOAD_N_STATS];
     const char fastnic_pmd_stats_file[100] = FASTNIC_PMD_STATS_FILE;
-    const char fastnic_all_stats_file[100] = FASTNIC_ALL_STATS_FILE;
     struct timeval tv;
     FILE *fp = NULL;
     
     gettimeofday(&tv, NULL);
 
-    if (pmd->core_id == NON_PMD_CORE_ID) {
-        fastnic_pmd_perf_read_counters(&pmd->fastnic_stats, stats_pmd);
-        fastnic_offload_perf_read_counters(&fastnic_offload_stats, stats_offload);
-        
-        if (unlikely(access(fastnic_all_stats_file, 0) != 0)) {
-            fp = fopen(fastnic_all_stats_file, "a+");
-            fprintf(fp, "pmd_measure_cnt,offload_measure_cnt,\
-                        timestamp,dimension,numa_id,core_id,\
-                        offload_create_pmd,offload_del_pmd,\
-                        put_ok,put_fail,mod_ok,mod_fail,rte_create_ok,rte_create_fail,\
-                        del_ok,del_fail,rte_del_ok,rte_del_fail\
-                        put_ok_cycle,put_fail_cycle,mod_ok_cycle,mod_fail_cycle\
-                        del_ok_cycle,del_fail_cycle\r\n");
-        } else {
-            fp = fopen(fastnic_all_stats_file, "a+");
-        }
-        if (fp == NULL) {
-            VLOG_INFO("can not open file %s", fastnic_all_stats_file);
-        }
-
-        uint64_t put_ok_cycle = 0, put_fail_cycle = 0;
-        uint64_t mod_ok_cycle = 0, mod_fail_cycle = 0;
-        uint64_t del_ok_cycle = 0, del_fail_cycle = 0;
-
-        if (stats_offload[OFFLOAD_CREATE_PUT_OK] != 0) {
-            put_ok_cycle = stats_offload[OFFLOAD_CREATE_PUT_OK_CYCLE] / stats_offload[OFFLOAD_CREATE_PUT_OK];
-        }
-        if (stats_offload[OFFLOAD_CREATE_PUT_FAIL] != 0) {
-            put_fail_cycle = stats_offload[OFFLOAD_CREATE_PUT_FAIL_CYCLE] / stats_offload[OFFLOAD_CREATE_PUT_FAIL];
-        }
-        if (stats_offload[OFFLOAD_CREATE_MOD_OK] != 0) {
-            mod_ok_cycle = stats_offload[OFFLOAD_CREATE_MOD_OK_CYCLE] / stats_offload[OFFLOAD_CREATE_MOD_OK];
-        }      
-        if (stats_offload[OFFLOAD_CREATE_MOD_FAIL] != 0) {
-            mod_fail_cycle = stats_offload[OFFLOAD_CREATE_MOD_FAIL_CYCLE] / stats_offload[OFFLOAD_CREATE_MOD_FAIL];
-        }        
-        if (stats_offload[OFFLOAD_DEL_API_OK] != 0) {
-            del_ok_cycle = stats_offload[OFFLOAD_DEL_API_OK_CYCLE] / stats_offload[OFFLOAD_DEL_API_OK];
-        }        
-        if (stats_offload[OFFLOAD_DEL_API_FAIL] != 0) {
-            del_fail_cycle = stats_offload[OFFLOAD_DEL_API_FAIL_CYCLE] / stats_offload[OFFLOAD_DEL_API_FAIL];
-        }
-
-        fprintf(fp, "%"PRIu64",", pmd->fastnic_stats.measure_cnt);
-        fprintf(fp, "%"PRIu64",", fastnic_offload_stats.measure_cnt);
-        fprintf(fp, "%ld,", tv.tv_sec);
-        fprintf(fp, "pmd,");//dimension 
-        fprintf(fp, "%d,", pmd->numa_id);
-        fprintf(fp, "%u,", pmd->core_id);
-
-        fprintf(fp, "%"PRIu64",", stats_pmd[OFFLOAD_CREATE_PMD]); /* call queue_netdev_flow_put */
-        fprintf(fp, "%"PRIu64",", stats_pmd[OFFLOAD_DEL_PMD]); /* call queue_netdev_flow_put */
-
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_PUT_OK]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_PUT_FAIL]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_MOD_OK]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_MOD_FAIL]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_RTE_OK]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_RTE_FAIL]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_API_OK]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_API_FAIL]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_RTE_OK]); 
-        fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_RTE_FAIL]); 
-        
-        fprintf(fp, "%"PRIu64",", put_ok_cycle); 
-        fprintf(fp, "%"PRIu64",", put_fail_cycle); 
-        fprintf(fp, "%"PRIu64",", mod_ok_cycle); 
-        fprintf(fp, "%"PRIu64",", mod_fail_cycle); 
-        fprintf(fp, "%"PRIu64",", del_ok_cycle); 
-        fprintf(fp, "%"PRIu64"\r\n", del_fail_cycle); 
-        
-        fclose(fp);
-
+    fastnic_pmd_perf_read_counters(&pmd->fastnic_stats, stats_pmd);
+    
+    if (unlikely(access(fastnic_pmd_stats_file, 0) != 0)) {
+        fp = fopen(fastnic_pmd_stats_file, "a+");
+        fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,\
+                    offload_create_pmd,offload_del_pmd\r\n");
     } else {
-        fastnic_pmd_perf_read_counters(&pmd->fastnic_stats, stats_pmd);
-        
-        if (unlikely(access(fastnic_pmd_stats_file, 0) != 0)) {
-            fp = fopen(fastnic_pmd_stats_file, "a+");
-            fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,\
-                        offload_create_pmd,offload_del_pmd\r\n");
-        } else {
-            fp = fopen(fastnic_pmd_stats_file, "a+");
-        }
-        if (fp == NULL) {
-            VLOG_INFO("can not open file %s", fastnic_pmd_stats_file);
-        }
-
-        fprintf(fp, "%"PRIu64",", pmd->fastnic_stats.measure_cnt);
-        fprintf(fp, "%ld,", tv.tv_sec);
-        fprintf(fp, "pmd,");//dimension 
-        fprintf(fp, "%d,", pmd->numa_id);
-        fprintf(fp, "%u,", pmd->core_id);
-        fprintf(fp, "%"PRIu64",", stats_pmd[OFFLOAD_CREATE_PMD]); /* call queue_netdev_flow_put */
-        fprintf(fp, "%"PRIu64"\r\n", stats_pmd[OFFLOAD_DEL_PMD]); /* call queue_netdev_flow_put */
-        fclose(fp);
+        fp = fopen(fastnic_pmd_stats_file, "a+");
     }
+    if (fp == NULL) {
+        VLOG_INFO("can not open file %s", fastnic_pmd_stats_file);
+    }
+
+    fprintf(fp, "%"PRIu64",", pmd->fastnic_stats.measure_cnt);
+    fprintf(fp, "%ld,", tv.tv_sec);
+    fprintf(fp, "pmd,");//dimension 
+    fprintf(fp, "%d,", pmd->numa_id);
+    fprintf(fp, "%u,", pmd->core_id);
+    fprintf(fp, "%"PRIu64",", stats_pmd[OFFLOAD_CREATE_PMD]); /* call queue_netdev_flow_put */
+    fprintf(fp, "%"PRIu64"\r\n", stats_pmd[OFFLOAD_DEL_PMD]); /* call queue_netdev_flow_put */
+    fclose(fp);
 }
+
+// change from lib/dpif-netdev.c:pmd_info_show_stats
+static void
+fastnic_offload_sta(void) 
+{
+    uint64_t stats_offload[FASTNIC_OFFLOAD_N_STATS];
+    const char fastnic_offload_stats_file[100] = FASTNIC_OFFLOAD_STATS_FILE;
+    struct timeval tv;
+    FILE *fp = NULL;
+    
+    gettimeofday(&tv, NULL);
+
+    fastnic_offload_perf_read_counters(&fastnic_offload_stats, stats_offload);
+    
+    if (unlikely(access(fastnic_offload_stats_file, 0) != 0)) {
+        fp = fopen(fastnic_offload_stats_file, "a+");
+        fprintf(fp, "offload_measure_cnt,timestamp,\
+                    put_ok,put_fail,mod_ok,mod_fail,rte_create_ok,rte_create_fail,\
+                    del_ok,del_fail,rte_del_ok,rte_del_fail\
+                    put_ok_cycle,put_fail_cycle,mod_ok_cycle,mod_fail_cycle\
+                    del_ok_cycle,del_fail_cycle\r\n");
+    } else {
+        fp = fopen(fastnic_offload_stats_file, "a+");
+    }
+    if (fp == NULL) {
+        VLOG_INFO("can not open file %s", fastnic_offload_stats_file);
+    }
+
+    uint64_t put_ok_cycle = 0, put_fail_cycle = 0;
+    uint64_t mod_ok_cycle = 0, mod_fail_cycle = 0;
+    uint64_t del_ok_cycle = 0, del_fail_cycle = 0;
+
+    if (stats_offload[OFFLOAD_CREATE_PUT_OK] != 0) {
+        put_ok_cycle = stats_offload[OFFLOAD_CREATE_PUT_OK_CYCLE] / stats_offload[OFFLOAD_CREATE_PUT_OK];
+    }
+    if (stats_offload[OFFLOAD_CREATE_PUT_FAIL] != 0) {
+        put_fail_cycle = stats_offload[OFFLOAD_CREATE_PUT_FAIL_CYCLE] / stats_offload[OFFLOAD_CREATE_PUT_FAIL];
+    }
+    if (stats_offload[OFFLOAD_CREATE_MOD_OK] != 0) {
+        mod_ok_cycle = stats_offload[OFFLOAD_CREATE_MOD_OK_CYCLE] / stats_offload[OFFLOAD_CREATE_MOD_OK];
+    }      
+    if (stats_offload[OFFLOAD_CREATE_MOD_FAIL] != 0) {
+        mod_fail_cycle = stats_offload[OFFLOAD_CREATE_MOD_FAIL_CYCLE] / stats_offload[OFFLOAD_CREATE_MOD_FAIL];
+    }        
+    if (stats_offload[OFFLOAD_DEL_API_OK] != 0) {
+        del_ok_cycle = stats_offload[OFFLOAD_DEL_API_OK_CYCLE] / stats_offload[OFFLOAD_DEL_API_OK];
+    }        
+    if (stats_offload[OFFLOAD_DEL_API_FAIL] != 0) {
+        del_fail_cycle = stats_offload[OFFLOAD_DEL_API_FAIL_CYCLE] / stats_offload[OFFLOAD_DEL_API_FAIL];
+    }
+
+    fprintf(fp, "%"PRIu64",", fastnic_offload_stats.measure_cnt);
+    fprintf(fp, "%ld,", tv.tv_sec);
+
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_PUT_OK]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_PUT_FAIL]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_MOD_OK]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_MOD_FAIL]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_RTE_OK]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_CREATE_RTE_FAIL]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_API_OK]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_API_FAIL]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_RTE_OK]); 
+    fprintf(fp, "%"PRIu64",", stats_offload[OFFLOAD_DEL_RTE_FAIL]); 
+    
+    fprintf(fp, "%"PRIu64",", put_ok_cycle); 
+    fprintf(fp, "%"PRIu64",", put_fail_cycle); 
+    fprintf(fp, "%"PRIu64",", mod_ok_cycle); 
+    fprintf(fp, "%"PRIu64",", mod_fail_cycle); 
+    fprintf(fp, "%"PRIu64",", del_ok_cycle); 
+    fprintf(fp, "%"PRIu64"\r\n", del_fail_cycle); 
+    
+    fclose(fp);
+}
+
 
 // static void
 // fastnic_stats_log(void)
@@ -616,6 +615,7 @@ print_log(pthread_t revalidator_thread_id)
 
     struct dp_netdev_pmd_thread **pmd_list;
     size_t n;
+    bool packet_flag = 0;
 
     pmd_list = read_pmd_thread(&n);
 
@@ -627,14 +627,18 @@ print_log(pthread_t revalidator_thread_id)
         }
         
         if (pmd_perf_read_counter(&pmd->perf_stats,PMD_STAT_RECV) > 0){
+            packet_flag = 1;
             /* print pmd_info */
-            one_pmd_stats(pmd);
+            one_pmd_sta(pmd);
             one_pmd_show_rxq(pmd);
             // pmd_info_show_perf(&reply, pmd, (struct pmd_perf_params *)aux);
             /* print fastnic_info */
-            fastnic_stats(pmd);
+            fastnic_pmd_sta(pmd);
         }
 
+        if(packet_flag == 1){
+            fastnic_offload_sta();
+        }
         /* clear stats*/ //qq: use OVS api temporarily
         pmd_perf_stats_clear(&pmd->perf_stats);
         fastnic_pmd_perf_stats_clear(&pmd->fastnic_stats);
