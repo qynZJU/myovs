@@ -221,7 +221,7 @@ one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd)
             fprintf(fp, "%s,", rxq_list[i].port); //port
             fprintf(fp, "%d,", rxq_list[i].queue_id); //queue id
             fprintf(fp, "%s,", rxq_list[i].queue_state ? "enabled" : "disabled"); //queue state
-            fprintf(fp, "%f,",rxq_list[i].pmd_usage);
+            fprintf(fp, "%f\r\n",rxq_list[i].pmd_usage);
         }
 
         // if (n_rxq > 0) {
