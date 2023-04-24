@@ -51,7 +51,7 @@ now_time_log(pthread_t thread_id){
     localtime_r(&tv.tv_sec, &tzone);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", &tzone);
     
-    VLOG_INFO("thread %ld, start dump at %s",thread_id, datetime);
+    VLOG_INFO("thread %ld, start dump at %s, accurate time as ",thread_id, datetime, tv.tv_sec, tv.tv_usec);
 }
 
 static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_stat_type counter) {
@@ -631,7 +631,7 @@ print_log(pthread_t revalidator_thread_id)
 
     struct dp_netdev_pmd_thread **pmd_list;
     size_t n;
-    bool packet_flag = 0;
+    bool pkt_active_flag = false;
 
     pmd_list = read_pmd_thread(&n);
 
@@ -643,7 +643,7 @@ print_log(pthread_t revalidator_thread_id)
         }
         
         if (pmd_perf_read_counter(&pmd->perf_stats,PMD_STAT_RECV) > 0){
-            packet_flag = 1;
+            pkt_active_flag = true;
             /* print pmd_info */
             one_pmd_sta(pmd);
             one_pmd_show_rxq(pmd);
@@ -652,9 +652,6 @@ print_log(pthread_t revalidator_thread_id)
             fastnic_pmd_sta(pmd);
         }
 
-        if(packet_flag == 1){
-            fastnic_offload_sta();
-        }
         /* clear stats*/ //qq: use OVS api temporarily
         pmd_perf_stats_clear(&pmd->perf_stats);
         fastnic_pmd_perf_stats_clear(&pmd->fastnic_stats);
@@ -662,6 +659,9 @@ print_log(pthread_t revalidator_thread_id)
     }
     free(pmd_list);
 
+    if(pkt_active_flag == true){
+        fastnic_offload_sta();
+    }
     fastnic_offload_perf_stats_clear(&fastnic_offload_stats);
     fastnic_offload_stats.measure_cnt++;
 
