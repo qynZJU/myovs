@@ -635,6 +635,11 @@ struct dpif_class {
      * sufficient to store BOND_BUCKETS number of elements. */
     int (*bond_stats_get)(struct dpif *dpif, uint32_t bond_id,
                           uint64_t *n_bytes);
+    #ifdef FASTNIC_LOG
+    int (*fastnic_flow_dump_next)(struct dpif_flow_dump_thread *,
+                                  struct dpif_flow *flows, int max_flows,
+                                  struct fastnic_revalidate_perf_stats *);
+    #endif
 };
 
 extern const struct dpif_class dpif_netlink_class;

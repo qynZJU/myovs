@@ -1144,6 +1144,35 @@ dpif_flow_dump_next(struct dpif_flow_dump_thread *thread,
     return n;
 }
 
+#ifdef FASTNIC_LOG
+int
+fastnic_dpif_flow_dump_next(struct dpif_flow_dump_thread *thread,
+                    struct dpif_flow *flows, int max_flows,
+                    struct fastnic_revalidate_perf_stats *perf_stats)
+{
+    struct dpif *dpif = thread->dpif;
+    int n;
+
+    ovs_assert(max_flows > 0);
+    #ifdef FASTNIC_LOG
+    n = dpif->dpif_class->fastnic_flow_dump_next(thread, flows, max_flows, perf_stats);
+    #endif
+    if (n > 0) {
+        struct dpif_flow *f;
+
+        for (f = flows; f < &flows[n]
+             && should_log_flow_message(&this_module, 0); f++) {
+            log_flow_message(dpif, 0, &this_module, "flow_dump",
+                             f->key, f->key_len, f->mask, f->mask_len,
+                             &f->ufid, &f->stats, f->actions, f->actions_len);
+        }
+    } else {
+        VLOG_DBG_RL(&dpmsg_rl, "%s: dumped all flows", dpif_name(dpif));
+    }
+    return n;
+}
+#endif
+
 struct dpif_execute_helper_aux {
     struct dpif *dpif;
     const struct flow *flow;

@@ -23,6 +23,9 @@
 #include "packets.h"
 #include "flow.h"
 
+#include "rte_flow.h"
+#include "fastnic_log.h"
+
 #ifdef  __cplusplus
 extern "C" {
 #endif
@@ -94,6 +97,13 @@ int netdev_hw_miss_packet_recover(struct netdev *, struct dp_packet *);
 int netdev_flow_get(struct netdev *, struct match *, struct nlattr **actions,
                     const ovs_u128 *, struct dpif_flow_stats *,
                     struct dpif_flow_attrs *, struct ofpbuf *wbuffer);
+#ifdef FASTNIC_LOG
+int fastnic_netdev_flow_get(struct netdev *netdev, struct match *match,
+                            struct nlattr **actions, const ovs_u128 *ufid,
+                            struct dpif_flow_stats *stats,
+                            struct dpif_flow_attrs *attrs, struct ofpbuf *buf,
+                            struct fastnic_perflow_perf_stats *flow_query);
+#endif 
 int netdev_flow_del(struct netdev *, const ovs_u128 *,
                     struct dpif_flow_stats *);
 int netdev_init_flow_api(struct netdev *);

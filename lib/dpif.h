@@ -385,6 +385,8 @@
 #include "packets.h"
 #include "util.h"
 
+#include "fastnic_log.h"
+
 #ifdef  __cplusplus
 extern "C" {
 #endif
@@ -607,6 +609,11 @@ struct dpif_flow {
 };
 int dpif_flow_dump_next(struct dpif_flow_dump_thread *,
                         struct dpif_flow *flows, int max_flows);
+#ifdef FASTNIC_LOG
+int fastnic_dpif_flow_dump_next(struct dpif_flow_dump_thread *,
+                                struct dpif_flow *flows, int max_flows,
+                                struct fastnic_revalidate_perf_stats *perf_stats);
+#endif
 
 #define DPIF_FLOW_BUFSIZE 2048
 

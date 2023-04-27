@@ -349,7 +349,11 @@ static void udpif_resume_revalidators(struct udpif *);
 static void *udpif_upcall_handler(void *);
 static void *udpif_revalidator(void *);
 static unsigned long udpif_get_n_flows(struct udpif *);
+#ifdef FASTNIC_LOG
+static void fastnic_revalidate(struct revalidator *revalidator, struct fastnic_revalidate_perf_stats *perf_stats);
+#else
 static void revalidate(struct revalidator *);
+#endif
 static void revalidator_pause(struct revalidator *);
 static void revalidator_sweep(struct revalidator *);
 static void revalidator_purge(struct revalidator *);
@@ -941,7 +945,14 @@ udpif_revalidator(void *arg)
     size_t n_flows = 0;
 
     revalidator->id = ovsthread_id_self();
+    #ifdef FASTNIC_LOG
+    struct fastnic_revalidate_perf_stats fn_reval_stats;
+    fastnic_reval_perf_stats_init(&fn_reval_stats);
+    #endif
     for (;;) {
+        #ifdef FASTNIC_LOG
+        fastnic_revel_perf_start_revaliteration(&fn_reval_stats);
+        #endif
         if (leader) {
             uint64_t reval_seq;
 
@@ -986,15 +997,17 @@ udpif_revalidator(void *arg)
         }
         
         #ifdef FASTNIC_LOG
+        fastnic_revalidate(revalidator,&fn_reval_stats);
+        print_reval_log(revalidator->id,&fn_reval_stats);
         if(leader){
             print_log(revalidator->thread);
             // VLOG_INFO("already offloading %ld flows (%ld failed), deleting %ld flows (%ld failed), remained %ld flows",
             //           flow_create_num, flow_create_fail_num, flow_destroy_num, flow_destroy_fail_num, flow_create_num-flow_destroy_num);
         }
-        #endif
-
+        #else
         revalidate(revalidator);
-
+        #endif
+        
         /* Wait for all flows to have been dumped before we garbage collect. */
         ovs_barrier_block(&udpif->reval_barrier);
         revalidator_sweep(revalidator);
@@ -2657,6 +2670,165 @@ udpif_update_used(struct udpif *udpif, struct udpif_key *ukey,
     return stats->used;
 }
 
+#ifdef FASTNIC_LOG
+static void
+fastnic_revalidate(struct revalidator *revalidator, struct fastnic_revalidate_perf_stats *perf_stats)
+{
+    uint64_t odp_actions_stub[1024 / 8];
+    struct ofpbuf odp_actions = OFPBUF_STUB_INITIALIZER(odp_actions_stub);
+
+    struct udpif *udpif = revalidator->udpif;
+    struct dpif_flow_dump_thread *dump_thread;
+    uint64_t dump_seq, reval_seq;
+    bool kill_warn_print = true;
+    unsigned int flow_limit;
+
+    dump_seq = seq_read(udpif->dump_seq);
+    reval_seq = seq_read(udpif->reval_seq);
+    atomic_read_relaxed(&udpif->flow_limit, &flow_limit);
+    dump_thread = dpif_flow_dump_thread_create(udpif->dump);
+    for (;;) {
+        struct ukey_op ops[REVALIDATE_MAX_BATCH];
+        int n_ops = 0;
+
+        struct dpif_flow flows[REVALIDATE_MAX_BATCH];
+        const struct dpif_flow *f;
+        int n_dumped;
+
+        long long int max_idle;
+        long long int now;
+        size_t kill_all_limit;
+        size_t n_dp_flows;
+        bool kill_them_all;
+
+        #ifdef FASTNIC_LOG
+        n_dumped = fastnic_dpif_flow_dump_next(dump_thread, flows, ARRAY_SIZE(flows), perf_stats);
+        #endif
+        if (!n_dumped) {
+            break;
+        }
+
+        now = time_msec();
+
+        /* In normal operation we want to keep flows around until they have
+         * been idle for 'ofproto_max_idle' milliseconds.  However:
+         *
+         *     - If the number of datapath flows climbs above 'flow_limit',
+         *       drop that down to 100 ms to try to bring the flows down to
+         *       the limit.
+         *
+         *     - If the number of datapath flows climbs above twice
+         *       'flow_limit', delete all the datapath flows as an emergency
+         *       measure.  (We reassess this condition for the next batch of
+         *       datapath flows, so we will recover before all the flows are
+         *       gone.) */
+        n_dp_flows = udpif_get_n_flows(udpif);
+        if (n_dp_flows >= flow_limit) {
+            COVERAGE_INC(upcall_flow_limit_hit);
+        }
+
+        kill_them_all = false;
+        kill_all_limit = flow_limit * 2;
+        if (OVS_UNLIKELY(n_dp_flows > kill_all_limit)) {
+            static struct vlog_rate_limit rlem = VLOG_RATE_LIMIT_INIT(1, 1);
+
+            kill_them_all = true;
+            COVERAGE_INC(upcall_flow_limit_kill);
+            if (kill_warn_print) {
+                kill_warn_print = false;
+                VLOG_WARN_RL(&rlem,
+                    "Number of datapath flows (%"PRIuSIZE") twice as high as "
+                    "current dynamic flow limit (%"PRIuSIZE").  "
+                    "Starting to delete flows unconditionally "
+                    "as an emergency measure.", n_dp_flows, kill_all_limit);
+            }
+        }
+
+        max_idle = n_dp_flows > flow_limit ? 100 : ofproto_max_idle;
+
+        udpif->dpif->current_ms = time_msec();
+        for (f = flows; f < &flows[n_dumped]; f++) {
+            long long int used = f->stats.used;
+            struct recirc_refs recircs = RECIRC_REFS_EMPTY_INITIALIZER;
+            struct dpif_flow_stats stats = f->stats;
+            enum reval_result result;
+            struct udpif_key *ukey;
+            bool already_dumped;
+            int error;
+
+            if (ukey_acquire(udpif, f, &ukey, &error)) {
+                if (error == EBUSY) {
+                    /* Another thread is processing this flow, so don't bother
+                     * processing it.*/
+                    COVERAGE_INC(upcall_ukey_contention);
+                } else {
+                    log_unexpected_flow(f, error);
+                    if (error != ENOENT) {
+                        delete_op_init__(udpif, &ops[n_ops++], f);
+                    }
+                }
+                continue;
+            }
+
+            already_dumped = ukey->dump_seq == dump_seq;
+            if (already_dumped) {
+                /* The flow has already been handled during this flow dump
+                 * operation. Skip it. */
+                if (ukey->xcache) {
+                    COVERAGE_INC(dumped_duplicate_flow);
+                } else {
+                    COVERAGE_INC(dumped_new_flow);
+                }
+                ovs_mutex_unlock(&ukey->mutex);
+                continue;
+            }
+
+            if (ukey->state <= UKEY_OPERATIONAL) {
+                /* The flow is now confirmed to be in the datapath. */
+                transition_ukey(ukey, UKEY_OPERATIONAL);
+            } else {
+                VLOG_INFO("Unexpected ukey transition from state %d "
+                          "(last transitioned from thread %u at %s)",
+                          ukey->state, ukey->state_thread, ukey->state_where);
+                ovs_mutex_unlock(&ukey->mutex);
+                continue;
+            }
+
+            if (!used) {
+                used = udpif_update_used(udpif, ukey, &stats);
+            }
+            if (kill_them_all || (used && used < now - max_idle)) {
+                result = UKEY_DELETE;
+            } else {
+                result = revalidate_ukey(udpif, ukey, &stats, &odp_actions,
+                                         reval_seq, &recircs,
+                                         f->attrs.offloaded);
+            }
+            ukey->dump_seq = dump_seq;
+
+            if (netdev_is_offload_rebalance_policy_enabled() &&
+                result != UKEY_DELETE) {
+                udpif_update_flow_pps(udpif, ukey, f);
+            }
+
+            if (result != UKEY_KEEP) {
+                /* Takes ownership of 'recircs'. */
+                reval_op_init(&ops[n_ops++], result, udpif, ukey, &recircs,
+                              &odp_actions);
+            }
+            ovs_mutex_unlock(&ukey->mutex);
+        }
+
+        if (n_ops) {
+            /* Push datapath ops but defer ukey deletion to 'sweep' phase. */
+            push_dp_ops(udpif, ops, n_ops);
+        }
+        ovsrcu_quiesce();
+    }
+    dpif_flow_dump_thread_destroy(dump_thread);
+    ofpbuf_uninit(&odp_actions);
+}
+#else
 static void
 revalidate(struct revalidator *revalidator)
 {
@@ -2812,6 +2984,8 @@ revalidate(struct revalidator *revalidator)
     dpif_flow_dump_thread_destroy(dump_thread);
     ofpbuf_uninit(&odp_actions);
 }
+#endif
+
 
 /* Pauses the 'revalidator', can only proceed after main thread
  * calls udpif_resume_revalidators(). */

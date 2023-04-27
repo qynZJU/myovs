@@ -3361,6 +3361,69 @@ dpif_netdev_get_flow_offload_status(const struct dp_netdev *dp,
     return true;
 }
 
+#ifdef FASTNIC_LOG
+static bool
+fastnic_dpif_netdev_get_flow_offload_status(const struct dp_netdev *dp,
+                                    struct dp_netdev_flow *netdev_flow,
+                                    struct dpif_flow_stats *stats,
+                                    struct dpif_flow_attrs *attrs,
+                                    struct fastnic_perflow_perf_stats *flow_query)
+{
+    uint64_t act_buf[1024 / 8];
+    struct nlattr *actions;
+    struct netdev *netdev;
+    struct match match;
+    struct ofpbuf buf;
+
+    int ret = 0;
+
+    if (!netdev_is_flow_api_enabled()) {
+        return false;
+    }
+
+    netdev = netdev_ports_get(netdev_flow->flow.in_port.odp_port,
+                              dpif_normalize_type(dp->class->type));
+    if (!netdev) {
+        return false;
+    }
+    ofpbuf_use_stack(&buf, &act_buf, sizeof act_buf);
+    /* Taking a global 'port_mutex' to fulfill thread safety
+     * restrictions for the netdev-offload-dpdk module.
+     *
+     * XXX: Main thread will try to pause/stop all revalidators during datapath
+     *      reconfiguration via datapath purge callback (dp_purge_cb) while
+     *      holding 'dp->port_mutex'.  So we're not waiting for mutex here.
+     *      Otherwise, deadlock is possible, bcause revalidators might sleep
+     *      waiting for the main thread to release the lock and main thread
+     *      will wait for them to stop processing.
+     *      This workaround might make statistics less accurate. Especially
+     *      for flow deletion case, since there will be no other attempt.  */
+    if (!ovs_mutex_trylock(&dp->port_mutex)) {
+        #ifdef FASTNIC_LOG
+        ret = fastnic_netdev_flow_get(netdev, &match, &actions, &netdev_flow->mega_ufid, 
+                                      stats, attrs, &buf, flow_query);
+        #endif
+        /* Storing statistics and attributes from the last request for
+         * later use on mutex contention. */
+        dp_netdev_flow_set_last_stats_attrs(netdev_flow, stats, attrs, ret);
+        ovs_mutex_unlock(&dp->port_mutex);
+    } else {
+        dp_netdev_flow_get_last_stats_attrs(netdev_flow, stats, attrs, &ret);
+        if (!ret && !attrs->dp_layer) {
+            /* Flow was never reported as 'offloaded' so it's harmless
+             * to continue to think so. */
+            ret = EAGAIN;
+        }
+    }
+    netdev_close(netdev);
+    if (ret) {
+        return false;
+    }
+
+    return true;
+}
+#endif
+
 static void
 get_dpif_flow_status(const struct dp_netdev *dp,
                      const struct dp_netdev_flow *netdev_flow_,
@@ -3400,6 +3463,57 @@ get_dpif_flow_status(const struct dp_netdev *dp,
         attrs->dp_layer = "ovs";
     }
 }
+
+#ifdef FASTNIC_LOG
+static void
+fastnic_get_dpif_flow_status(const struct dp_netdev *dp,
+                     const struct dp_netdev_flow *netdev_flow_,
+                     struct dpif_flow_stats *stats,
+                     struct dpif_flow_attrs *attrs,
+                     struct fastnic_perflow_perf_stats *flow_query)
+{
+    struct dpif_flow_stats offload_stats;
+    struct dpif_flow_attrs offload_attrs;
+    struct dp_netdev_flow *netdev_flow;
+    unsigned long long n;
+    long long used;
+    uint16_t flags;
+
+    netdev_flow = CONST_CAST(struct dp_netdev_flow *, netdev_flow_);
+
+    atomic_read_relaxed(&netdev_flow->stats.packet_count, &n);
+    stats->n_packets = n;
+    atomic_read_relaxed(&netdev_flow->stats.byte_count, &n);
+    stats->n_bytes = n;
+    atomic_read_relaxed(&netdev_flow->stats.used, &used);
+    stats->used = used;
+    atomic_read_relaxed(&netdev_flow->stats.tcp_flags, &flags);
+    stats->tcp_flags = flags;
+
+    #ifdef FASTNIC_LOG
+    if (fastnic_dpif_netdev_get_flow_offload_status(dp, netdev_flow, &offload_stats, 
+                                                    &offload_attrs, flow_query)) {
+        stats->n_packets += offload_stats.n_packets;
+        stats->n_bytes += offload_stats.n_bytes;
+        stats->used = MAX(stats->used, offload_stats.used);
+        stats->tcp_flags |= offload_stats.tcp_flags;
+        if (attrs) {
+            attrs->offloaded = offload_attrs.offloaded;
+            attrs->dp_layer = offload_attrs.dp_layer;
+        }
+    } else if (attrs) {
+        attrs->offloaded = false;
+        attrs->dp_layer = "ovs";
+        flow_query->flow_type = SOFTWARE_FLOW;
+        memset(&flow_query->flow_offload_query, 0, sizeof(flow_query->flow_offload_query));
+    } else {
+        flow_query->flow_type = DUMPFAIL_FLOW;
+        memset(&flow_query->flow_offload_query, 0, sizeof(flow_query->flow_offload_query));
+    }
+    #endif
+}
+#endif
+
 
 /* Converts to the dpif_flow format, using 'key_buf' and 'mask_buf' for
  * storing the netlink-formatted key/mask. 'key_buf' may be the same as
@@ -3454,6 +3568,63 @@ dp_netdev_flow_to_dpif_flow(const struct dp_netdev *dp,
     get_dpif_flow_status(dp, netdev_flow, &flow->stats, &flow->attrs);
     flow->attrs.dp_extra_info = netdev_flow->dp_extra_info;
 }
+
+#ifdef FASTNIC_LOG
+static void
+fastnic_dp_netdev_flow_to_dpif_flow(const struct dp_netdev *dp,
+                            const struct dp_netdev_flow *netdev_flow,
+                            struct ofpbuf *key_buf, struct ofpbuf *mask_buf,
+                            struct dpif_flow *flow, bool terse,
+                            struct fastnic_perflow_perf_stats *flow_query)
+{
+    if (terse) {
+        memset(flow, 0, sizeof *flow);
+    } else {
+        struct flow_wildcards wc;
+        struct dp_netdev_actions *actions;
+        size_t offset;
+        struct odp_flow_key_parms odp_parms = {
+            .flow = &netdev_flow->flow,
+            .mask = &wc.masks,
+            .support = dp_netdev_support,
+        };
+
+        miniflow_expand(&netdev_flow->cr.mask->mf, &wc.masks);
+        /* in_port is exact matched, but we have left it out from the mask for
+         * optimnization reasons. Add in_port back to the mask. */
+        wc.masks.in_port.odp_port = ODPP_NONE;
+
+        /* Key */
+        offset = key_buf->size;
+        flow->key = ofpbuf_tail(key_buf);
+        odp_flow_key_from_flow(&odp_parms, key_buf);
+        flow->key_len = key_buf->size - offset;
+
+        /* Mask */
+        offset = mask_buf->size;
+        flow->mask = ofpbuf_tail(mask_buf);
+        odp_parms.key_buf = key_buf;
+        odp_flow_key_from_mask(&odp_parms, mask_buf);
+        flow->mask_len = mask_buf->size - offset;
+
+        /* Actions */
+        actions = dp_netdev_flow_get_actions(netdev_flow);
+        flow->actions = actions->actions;
+        flow->actions_len = actions->size;
+    }
+
+    flow->ufid = netdev_flow->ufid;
+    flow->ufid_present = true;
+    flow->pmd_id = netdev_flow->pmd_id;
+
+    #ifdef FASTNIC_LOG
+    fastnic_get_dpif_flow_status(dp, netdev_flow, &flow->stats, &flow->attrs,flow_query);
+    #endif
+    flow->attrs.dp_extra_info = netdev_flow->dp_extra_info;
+}
+#endif
+
+
 
 static int
 dpif_netdev_mask_from_nlattrs(const struct nlattr *key, uint32_t key_len,
@@ -4210,6 +4381,93 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
 
     return n_flows;
 }
+
+#ifdef FASTNIC_LOG
+static int
+fastnic_dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
+                           struct dpif_flow *flows, int max_flows,
+                           struct fastnic_revalidate_perf_stats * perf_stats)
+{
+    struct dpif_netdev_flow_dump_thread *thread
+        = dpif_netdev_flow_dump_thread_cast(thread_);
+    struct dpif_netdev_flow_dump *dump = thread->dump;
+    struct dp_netdev_flow *netdev_flows[FLOW_DUMP_MAX_BATCH];
+    struct dpif_netdev *dpif = dpif_netdev_cast(thread->up.dpif);
+    struct dp_netdev *dp = get_dp_netdev(&dpif->dpif);
+    int n_flows = 0;
+    int i;
+
+    ovs_mutex_lock(&dump->mutex);
+    if (!dump->status) {
+        struct dp_netdev_pmd_thread *pmd = dump->cur_pmd;
+        int flow_limit = MIN(max_flows, FLOW_DUMP_MAX_BATCH);
+
+        /* First call to dump_next(), extracts the first pmd thread.
+         * If there is no pmd thread, returns immediately. */
+        if (!pmd) {
+            pmd = dp_netdev_pmd_get_next(dp, &dump->poll_thread_pos);
+            if (!pmd) {
+                ovs_mutex_unlock(&dump->mutex);
+                return n_flows;
+
+            }
+        }
+
+        do {
+            for (n_flows = 0; n_flows < flow_limit; n_flows++) {
+                struct cmap_node *node;
+
+                node = cmap_next_position(&pmd->flow_table, &dump->flow_pos);
+                if (!node) {
+                    break;
+                }
+                netdev_flows[n_flows] = CONTAINER_OF(node,
+                                                     struct dp_netdev_flow,
+                                                     node);
+            }
+            /* When finishing dumping the current pmd thread, moves to
+             * the next. */
+            if (n_flows < flow_limit) {
+                memset(&dump->flow_pos, 0, sizeof dump->flow_pos);
+                dp_netdev_pmd_unref(pmd);
+                pmd = dp_netdev_pmd_get_next(dp, &dump->poll_thread_pos);
+                if (!pmd) {
+                    dump->status = EOF;
+                    break;
+                }
+            }
+            /* Keeps the reference to next caller. */
+            dump->cur_pmd = pmd;
+
+            /* If the current dump is empty, do not exit the loop, since the
+             * remaining pmds could have flows to be dumped.  Just dumps again
+             * on the new 'pmd'. */
+        } while (!n_flows);
+    }
+    ovs_mutex_unlock(&dump->mutex);
+
+    for (i = 0; i < n_flows; i++) {
+        struct odputil_keybuf *maskbuf = &thread->maskbuf[i];
+        struct odputil_keybuf *keybuf = &thread->keybuf[i];
+        struct dp_netdev_flow *netdev_flow = netdev_flows[i];
+        struct dpif_flow *f = &flows[i];
+        struct ofpbuf key, mask;
+
+        ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
+        ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
+        #ifdef FASTNIC_LOG
+        struct fastnic_perflow_perf_stats flow_query ={
+            .flow_type = EMPTY_FLOW,
+        };
+        fastnic_dp_netdev_flow_to_dpif_flow(dp, netdev_flow, &key, &mask, f,
+                                    dump->up.terse, &flow_query);
+        fastnic_reval_perf_update_counters(perf_stats, &flow_query);
+        #endif
+    }
+
+    return n_flows;
+}
+#endif
 
 static int
 dpif_netdev_execute(struct dpif *dpif, struct dpif_execute *execute)
@@ -9370,6 +9628,9 @@ const struct dpif_class dpif_netdev_class = {
     dpif_netdev_bond_add,
     dpif_netdev_bond_del,
     dpif_netdev_bond_stats_get,
+    #ifdef FASTNIC_LOG
+    fastnic_dpif_netdev_flow_dump_next,
+    #endif
 };
 
 static void

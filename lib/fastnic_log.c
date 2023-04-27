@@ -19,6 +19,7 @@
 #define RXQ_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/pmd_rxq_stats.csv"
 #define FASTNIC_PMD_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_pmd_stats.csv"
 #define FASTNIC_OFFLOAD_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_ol_stats.csv"
+#define FASTNIC_REVAL_STATS_FILE "/home/ubuntu/software/FastNIC/lab_results/ovs_log/fastnic_reval_stats.csv"
 
 VLOG_DEFINE_THIS_MODULE(fastnic_log);
 
@@ -33,13 +34,20 @@ static void one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd);
 // static void pmd_stats_log(void);
 static void fastnic_pmd_perf_stats_clear_lock(struct fastnic_pmd_perf_stats *s);
 static void fastnic_pmd_perf_stats_clear(struct fastnic_pmd_perf_stats *s);
-static void fastnic_pmd_perf_read_counters(const struct fastnic_pmd_perf_stats *s, uint64_t stats[FASTNIC_PMD_N_STATS]);
+static void fastnic_pmd_perf_read_counters(const struct fastnic_pmd_perf_stats *s, 
+                                           uint64_t stats[FASTNIC_PMD_N_STATS]);
 static void fastnic_offload_perf_stats_clear_lock(struct fastnic_offload_perf_stats *s);
 static void fastnic_offload_perf_stats_clear(struct fastnic_offload_perf_stats *s);
-static void fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s, uint64_t stats[FASTNIC_OFFLOAD_N_STATS]);
+static void fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s, 
+                                               uint64_t stats[FASTNIC_OFFLOAD_N_STATS]);
 static void fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd);
 static void fastnic_offload_sta(void);
-// static void fastnic_stats_log(void);
+static void fastnic_reval_perf_stats_clear_lock(struct fastnic_revalidate_perf_stats *s);
+static void fastnic_reval_perf_stats_clear(struct fastnic_revalidate_perf_stats *s);
+static void fastnic_reval_perf_read_counters(const struct fastnic_revalidate_perf_stats *s,
+                                             uint64_t stats[FASTNIC_REVALIDATE_N_STATS]);
+static void fastnic_reval_sta(unsigned int revalidator_thread_id,
+                              struct fastnic_revalidate_perf_stats *perf_stats);
 
 static void
 now_time_log(pthread_t thread_id){
@@ -105,7 +113,7 @@ one_pmd_sta(struct dp_netdev_pmd_thread *pmd)
     }
 
     /* stats of packets*/
-    if (unlikely(access(pkt_stats_file, 0) != 0)) {
+    if (OVS_UNLIKELY(access(pkt_stats_file, 0) != 0)) {
         fp = fopen(pkt_stats_file, "a+");
         fprintf(fp, "measure_cnt,timestamp,interval/ms,dimension,numa_id,core_id,\
                     rcv_pkts,rcircu_pkts,PHWOL_pkts,MFEX_pkts,EMC_pkts,SMC_pkts,\
@@ -142,7 +150,7 @@ one_pmd_sta(struct dp_netdev_pmd_thread *pmd)
 
     /* stats of cycles*/
     fp = NULL;
-    if (unlikely(access(cycle_stats_file, 0) != 0)) {
+    if (OVS_UNLIKELY(access(cycle_stats_file, 0) != 0)) {
         fp = fopen(cycle_stats_file, "a+");
         fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,rcv_pkts\r\n");
     } else {
@@ -199,7 +207,7 @@ one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd)
         n_rxq = read_rxq_list (pmd, &rxq_list);
 
         /* stats of rxq*/
-        if (unlikely(access(rxq_stats_file, 0) != 0)) {
+        if (OVS_UNLIKELY(access(rxq_stats_file, 0) != 0)) {
             fp = fopen(rxq_stats_file, "a+");
             fprintf(fp, "measure_cnt,timestamp,interval/ms,dimension,numa_id,core_id,\
                         isolated,port,queue_id,queue_state,pmd_usage\r\n");
@@ -496,7 +504,7 @@ fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd)
 
     fastnic_pmd_perf_read_counters(&pmd->fastnic_stats, stats_pmd);
     
-    if (unlikely(access(fastnic_pmd_stats_file, 0) != 0)) {
+    if (OVS_UNLIKELY(access(fastnic_pmd_stats_file, 0) != 0)) {
         fp = fopen(fastnic_pmd_stats_file, "a+");
         fprintf(fp, "measure_cnt,timestamp,interval/ms,dimension,numa_id,core_id,\
                     offload_create_pmd,offload_del_pmd\r\n");
@@ -533,7 +541,7 @@ fastnic_offload_sta(void)
 
     fastnic_offload_perf_read_counters(&fastnic_offload_stats, stats_offload);
     
-    if (unlikely(access(fastnic_offload_stats_file, 0) != 0)) {
+    if (OVS_UNLIKELY(access(fastnic_offload_stats_file, 0) != 0)) {
         fp = fopen(fastnic_offload_stats_file, "a+");
         fprintf(fp, "offload_measure_cnt,timestamp,interval,\
                     put_ok,put_fail,mod_ok,mod_fail,rte_create_ok,rte_create_fail,\
@@ -594,32 +602,146 @@ fastnic_offload_sta(void)
     fclose(fp);
 }
 
+//change from lib/dpif-netdev-perf.c:pmd_perf_stats_init
+void
+fastnic_reval_perf_stats_init(struct fastnic_revalidate_perf_stats *s)
+{
+    memset(s, 0, sizeof(*s));
+    ovs_mutex_init(&s->stats_mutex);
+    ovs_mutex_init(&s->clear_mutex);
+    
+    // s->start_ms = time_msec();
+    gettimeofday(&s->start_t, NULL);
+    s->measure_cnt = 0;
+}
 
-// static void
-// fastnic_stats_log(void)
-// {
-//     struct dp_netdev_pmd_thread **pmd_list;
-//     size_t n;
+//change from lib/dpif-netdev-perf.c:pmd_perf_stats_clear_lock
+static void
+fastnic_reval_perf_stats_clear_lock(struct fastnic_revalidate_perf_stats *s)
+    OVS_REQUIRES(s->stats_mutex)
+{
+    ovs_mutex_lock(&s->clear_mutex);
+    for (int i = 0; i < FASTNIC_REVALIDATE_N_STATS; i++) {
+        atomic_read_relaxed(&s->counters.n[i], &s->counters.zero[i]);
+    }
 
-//     pmd_list = read_pmd_thread(&n);
+    // s->start_ms = time_msec();
+    gettimeofday(&s->start_t, NULL);
+    /* Clearing finished. */
+    s->clear = false;
+    ovs_mutex_unlock(&s->clear_mutex);
+}
 
-//     for (size_t i = 0; i < n; i++) {
-//         struct dp_netdev_pmd_thread *pmd = pmd_list[i];
+//change from lib/dpif-netdev-perf.c:pmd_perf_stats_clear
+static void
+fastnic_reval_perf_stats_clear(struct fastnic_revalidate_perf_stats *s)
+{
+    if (ovs_mutex_trylock(&s->stats_mutex) == 0) {
+        /* Locking successful. PMD not polling. */
+        fastnic_reval_perf_stats_clear_lock(s);
+        ovs_mutex_unlock(&s->stats_mutex);
+    } else {
+        /* Request the polling PMD to clear the stats. There is no need to
+         * block here as stats retrieval is prevented during clearing. */
+        s->clear = true;
+    }
+}
 
-//         if (!pmd) {
-//             break;
-//         }
-//         /* show info*/
-//         fastnic_stats(pmd);
-        
-//         /* clear stats*/
-//         fastnic_pmd_perf_stats_clear(&pmd->fastnic_stats);
-//         pmd->fastnic_stats.measure_cnt++;
-//     }
-//     free(pmd_list);
-//     fastnic_offload_perf_stats_clear(&fastnic_offload_stats);
-//     fastnic_offload_stats.measure_cnt++;
-// }
+//change from lib/dpif-netdev-perf.c:pmd_perf_start_iteration
+void
+fastnic_revel_perf_start_revaliteration(struct fastnic_revalidate_perf_stats *s)
+OVS_REQUIRES(s->stats_mutex)
+{
+    if (s->clear) {
+        /* Clear the PMD stats before starting next iteration. */
+        fastnic_reval_perf_stats_clear_lock(s);
+    }
+}
+
+void
+fastnic_reval_perf_update_counters(struct fastnic_revalidate_perf_stats *s,
+                                   struct fastnic_perflow_perf_stats *flow_query)
+{
+    if(flow_query->flow_type == OFFLOAD_FLOW){
+        if(flow_query->flow_offload_query.hits_set == 1 && flow_query->flow_offload_query.bytes_set == 1){
+            fastnic_reval_update_counter(s, OFFLOAD_FLOW_NUM, 1);
+            fastnic_reval_update_counter(s, OFFLOAD_FLOW_PKTS, flow_query->flow_offload_query.hits);
+            fastnic_reval_update_counter(s, OFFLOAD_FLOW_BYTES, flow_query->flow_offload_query.bytes);
+        }else{
+            fastnic_reval_update_counter(s, OFFLOAD_NONSAVE_FLOW_NUM, 1);
+        }
+    }else if (flow_query->flow_type == SOFTWARE_FLOW){
+        fastnic_reval_update_counter(s, SOFTWARE_FLOW_NUM, 1);
+    }else if (flow_query->flow_type == DUMPFAIL_FLOW){
+        fastnic_reval_update_counter(s, DUMPFAIL_FLOW_NUM, 1);
+    }else if (flow_query->flow_type == EMPTY_FLOW){
+        fastnic_reval_update_counter(s, EMPTY_FLOW_NUM, 1);
+    }
+}
+
+//change from lib/dpif-netdev-perf.c: pmd_perf_read_counters
+static void
+fastnic_reval_perf_read_counters(const struct fastnic_revalidate_perf_stats *s,
+                       uint64_t stats[FASTNIC_REVALIDATE_N_STATS])
+{
+    uint64_t val;
+
+    /* These loops subtracts reference values (.zero[*]) from the counters.
+     * Since loads and stores are relaxed, it might be possible for a .zero[*]
+     * value to be more recent than the current value we're reading from the
+     * counter.  This is not a big problem, since these numbers are not
+     * supposed to be 100% accurate, but we should at least make sure that
+     * the result is not negative. */
+    for (int i = 0; i < FASTNIC_REVALIDATE_N_STATS; i++) {
+        atomic_read_relaxed(&s->counters.n[i], &val);
+        if (val > s->counters.zero[i]) {
+            stats[i] = val - s->counters.zero[i];
+        } else {
+            stats[i] = 0;
+        }
+    }
+}
+
+static void
+fastnic_reval_sta(unsigned int revalidator_thread_id,
+                struct fastnic_revalidate_perf_stats *perf_stats) 
+{
+    uint64_t stats_reval[FASTNIC_REVALIDATE_N_STATS];
+    const char fastnic_reval_stats_file[100] = FASTNIC_REVAL_STATS_FILE;
+    struct timeval tv;
+    uint64_t time_interval;
+    FILE *fp = NULL;
+    
+    gettimeofday(&tv, NULL);
+    time_interval = (tv.tv_sec - perf_stats->start_t.tv_sec)*1000 + (tv.tv_usec -  perf_stats->start_t.tv_usec)/1000; //accurate to millisecond
+
+    fastnic_reval_perf_read_counters(perf_stats, stats_reval);
+    
+    if (OVS_UNLIKELY(access(fastnic_reval_stats_file, 0) != 0)) {
+        fp = fopen(fastnic_reval_stats_file, "a+");
+        fprintf(fp, "measure_cnt,timestamp,interval/ms,reval_id\
+                    offload_flow_num,offload_pkt_num,offload_bytes,\
+                    offload_nonsta_flow_num,software_flow_num,dumpfail_flow_num,empty_flow\r\n");
+    } else {
+        fp = fopen(fastnic_reval_stats_file, "a+");
+    }
+    if (fp == NULL) {
+        VLOG_INFO("can not open file %s", fastnic_reval_stats_file);
+    }
+
+    fprintf(fp, "%"PRIu64",", perf_stats->measure_cnt);
+    fprintf(fp, "%ld,", tv.tv_sec);
+    fprintf(fp, "%"PRIu64",", time_interval);
+    fprintf(fp, "%u", revalidator_thread_id);
+    fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_FLOW_NUM]); 
+    fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_FLOW_PKTS]); 
+    fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_FLOW_BYTES]); 
+    fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_NONSAVE_FLOW_NUM]); 
+    fprintf(fp, "%"PRIu64",", stats_reval[SOFTWARE_FLOW_NUM]); 
+    fprintf(fp, "%"PRIu64",", stats_reval[DUMPFAIL_FLOW_NUM]); 
+    fprintf(fp, "%"PRIu64"\r\n", stats_reval[EMPTY_FLOW_NUM]); 
+    fclose(fp);
+}
 
 //change from lib/dpif-netdev.c:dpif_netdev_pmd_info
 int
@@ -668,3 +790,14 @@ print_log(pthread_t revalidator_thread_id)
     return 0;
 }
 
+//every revalidate thread print its own stats
+int
+print_reval_log(unsigned int revalidator_id,
+                struct fastnic_revalidate_perf_stats *perf_stats)
+{
+    fastnic_reval_sta(revalidator_id, perf_stats);
+    fastnic_reval_perf_stats_clear(perf_stats);
+    perf_stats->measure_cnt++;
+
+    return 0;
+}

@@ -4368,6 +4368,9 @@ const struct dpif_class dpif_netlink_class = {
     NULL,                       /* bond_add */
     NULL,                       /* bond_del */
     NULL,                       /* bond_stats_get */
+    #ifdef FASTNIC_LOG
+    NULL,
+    #endif
 };
 
 static int

@@ -24,6 +24,7 @@
 #include "openvswitch/types.h"
 #include "packets.h"
 
+#include "fastnic_log.h"
 #ifdef  __cplusplus
 extern "C" {
 #endif
@@ -96,6 +97,14 @@ struct netdev_flow_api {
     /* Initializies the netdev flow api.
      * Return 0 if successful, otherwise returns a positive errno value. */
     int (*init_flow_api)(struct netdev *);
+
+    /* same function as flow_get, but output query to upper function*/
+    #ifdef FASTNIC_LOG
+    int (*fastnic_flow_get)(struct netdev *, struct match *, struct nlattr **actions,
+                            const ovs_u128 *ufid, struct dpif_flow_stats *,
+                            struct dpif_flow_attrs *, struct ofpbuf *wbuffer,
+                            struct fastnic_perflow_perf_stats *);
+    #endif
 };
 
 int netdev_register_flow_api_provider(const struct netdev_flow_api *);

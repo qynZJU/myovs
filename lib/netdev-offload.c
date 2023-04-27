@@ -280,6 +280,29 @@ netdev_flow_get(struct netdev *netdev, struct match *match,
            : EOPNOTSUPP;
 }
 
+#ifdef FASTNIC_LOG
+int
+fastnic_netdev_flow_get(struct netdev *netdev, struct match *match,
+                struct nlattr **actions, const ovs_u128 *ufid,
+                struct dpif_flow_stats *stats,
+                struct dpif_flow_attrs *attrs, struct ofpbuf *buf,
+                struct fastnic_perflow_perf_stats *flow_query)
+{
+    const struct netdev_flow_api *flow_api =
+        ovsrcu_get(const struct netdev_flow_api *, &netdev->flow_api);
+
+    #ifdef FASTNIC_LOG
+    return (flow_api && flow_api->fastnic_flow_get)
+           ? flow_api->fastnic_flow_get(netdev, match, actions, ufid,
+                                stats, attrs, buf,flow_query)
+           : EOPNOTSUPP;
+    #endif
+}
+#else
+#warning "FASTNIC_LOG is not defined"
+#endif
+
+
 int
 netdev_flow_del(struct netdev *netdev, const ovs_u128 *ufid,
                 struct dpif_flow_stats *stats)

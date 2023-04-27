@@ -3,6 +3,7 @@
 
 #include "ovs-atomic.h"
 #include "openvswitch/thread.h"
+#include "rte_flow.h"
 
 #ifdef DPDK_NETDEV
 #include <rte_cycles.h>
@@ -105,13 +106,69 @@ struct fastnic_offload_perf_stats{
     struct fastnic_offload_counters counters;
 };
 
+#define OFFLOAD_FLOW    0
+#define SOFTWARE_FLOW   1
+#define DUMPFAIL_FLOW   2
+#define EMPTY_FLOW      3
+
+struct fastnic_perflow_perf_stats{
+    uint32_t flow_type;
+    struct rte_flow_query_count flow_offload_query;
+};
+
+enum fastnic_revalidate_stat_type {
+    OFFLOAD_FLOW_NUM,
+    OFFLOAD_FLOW_PKTS,
+    OFFLOAD_FLOW_BYTES,
+
+    OFFLOAD_NONSAVE_FLOW_NUM, /* flows offloaded but whose statistics is not saved*/
+
+    SOFTWARE_FLOW_NUM,
+    SOFTWARE_FLOW_PKTS,
+    SOFTWARE_FLOW_BYTES,
+
+    DUMPFAIL_FLOW_NUM,
+    EMPTY_FLOW_NUM,
+
+    FASTNIC_REVALIDATE_N_STATS
+};
+
+struct fastnic_revalidate_counters {
+    atomic_uint64_t n[FASTNIC_REVALIDATE_N_STATS];     /* Value since _init(). */
+    uint64_t zero[FASTNIC_REVALIDATE_N_STATS];         /* Value at last _clear().  */
+};
+
+struct fastnic_revalidate_perf_stats{ 
+    /* Prevents interference between PMD polling and stats clearing. */
+    struct ovs_mutex stats_mutex;
+    /* Set by CLI thread to order clearing of PMD stats. */
+    volatile bool clear;
+    /* Prevents stats retrieval while clearing is in progress. */
+    struct ovs_mutex clear_mutex;
+
+    /* Start of the current performance measurement period. */
+    //uint64_t start_ms;
+    struct timeval start_t;
+    /* counter of performance measurement periods since the program run*/
+    uint64_t measure_cnt;    
+    
+    struct fastnic_revalidate_counters counters;
+};
+
+
 extern struct fastnic_offload_perf_stats fastnic_offload_stats;
 
 void fastnic_pmd_perf_stats_init(struct fastnic_pmd_perf_stats *s);
 void fastnic_pmd_perf_start_pmditeration(struct fastnic_pmd_perf_stats *s);
 void fastnic_offload_perf_stats_init(struct fastnic_offload_perf_stats *s);
 void fastnic_offload_perf_start_offloaditeration(struct fastnic_offload_perf_stats *s);
-int print_log(pthread_t thread_id);
+void fastnic_reval_perf_stats_init(struct fastnic_revalidate_perf_stats *s);
+void fastnic_revel_perf_start_revaliteration(struct fastnic_revalidate_perf_stats *s);
+void fastnic_reval_perf_update_counters(struct fastnic_revalidate_perf_stats *s,
+                                   struct fastnic_perflow_perf_stats *flow_query);
+int print_log(pthread_t revalidator_thread_id);
+int print_reval_log(unsigned int revalidator_id,
+                    struct fastnic_revalidate_perf_stats *perf_stats);
 
 
 /* PMD performance counters are updated lock-less. For real PMDs
@@ -136,6 +193,16 @@ fastnic_perf_update_counter(struct fastnic_pmd_perf_stats *s,
 static inline void
 fastnic_offload_update_counter(struct fastnic_offload_perf_stats *s,
                         enum fastnic_offload_stat_type counter, int delta)
+{
+    uint64_t tmp;
+    atomic_read_relaxed(&s->counters.n[counter], &tmp);
+    tmp += delta;
+    atomic_store_relaxed(&s->counters.n[counter], tmp);
+}
+
+static inline void
+fastnic_reval_update_counter(struct fastnic_revalidate_perf_stats *s,
+                        enum fastnic_revalidate_stat_type counter, int delta)
 {
     uint64_t tmp;
     atomic_read_relaxed(&s->counters.n[counter], &tmp);
