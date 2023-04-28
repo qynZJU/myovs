@@ -2127,7 +2127,7 @@ fastnic_netdev_offload_dpdk_flow_get(struct netdev *netdev,
     memcpy(stats, &rte_flow_data->stats, sizeof *stats);
     #ifdef FASTNIC_LOG
     flow_query->flow_type = OFFLOAD_FLOW;
-    memcpy(flow_query, &query, sizeof *flow_query);
+    memcpy(&flow_query->flow_offload_query, &query, sizeof (flow_query->flow_offload_query));
     #endif
 out:
     attrs->dp_extra_info = NULL;

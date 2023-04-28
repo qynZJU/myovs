@@ -152,7 +152,8 @@ one_pmd_sta(struct dp_netdev_pmd_thread *pmd)
     fp = NULL;
     if (OVS_UNLIKELY(access(cycle_stats_file, 0) != 0)) {
         fp = fopen(cycle_stats_file, "a+");
-        fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,rcv_pkts\r\n");
+        fprintf(fp, "measure_cnt,timestamp,dimension,numa_id,core_id,rcv_pkts,\
+                    idle_cycle,busy_cycle,idle_radio,busy_radio,cycle_per_packet,busy_cycle_per_packet\r\n");
     } else {
         fp = fopen(cycle_stats_file, "a+");
     }
@@ -178,7 +179,7 @@ one_pmd_sta(struct dp_netdev_pmd_thread *pmd)
         fprintf(fp, "NaN,"); //percentage of busy cycle
     }
     if (total_packets != 0){
-        fprintf(fp, "%.02f%%,", total_cycles / (double) total_packets);
+        fprintf(fp, "%.02f,", total_cycles / (double) total_packets);
         fprintf(fp, "%.02f\r\n", stats[PMD_CYCLES_ITER_BUSY] / (double) total_packets);
     }else {
         fprintf(fp, "NaN,"); //avg cycles per packet
@@ -545,8 +546,8 @@ fastnic_offload_sta(void)
         fp = fopen(fastnic_offload_stats_file, "a+");
         fprintf(fp, "offload_measure_cnt,timestamp,interval,\
                     put_ok,put_fail,mod_ok,mod_fail,rte_create_ok,rte_create_fail,\
-                    del_ok,del_fail,rte_del_ok,rte_del_fail\
-                    put_ok_cycle,put_fail_cycle,mod_ok_cycle,mod_fail_cycle\
+                    del_ok,del_fail,rte_del_ok,rte_del_fail,\
+                    put_ok_cycle,put_fail_cycle,mod_ok_cycle,mod_fail_cycle,\
                     del_ok_cycle,del_fail_cycle\r\n");
     } else {
         fp = fopen(fastnic_offload_stats_file, "a+");
@@ -719,7 +720,7 @@ fastnic_reval_sta(unsigned int revalidator_thread_id,
     
     if (OVS_UNLIKELY(access(fastnic_reval_stats_file, 0) != 0)) {
         fp = fopen(fastnic_reval_stats_file, "a+");
-        fprintf(fp, "measure_cnt,timestamp,interval/ms,reval_id\
+        fprintf(fp, "measure_cnt,timestamp,interval/ms,reval_id,\
                     offload_flow_num,offload_pkt_num,offload_bytes,\
                     offload_nonsta_flow_num,software_flow_num,dumpfail_flow_num,empty_flow\r\n");
     } else {
@@ -732,7 +733,7 @@ fastnic_reval_sta(unsigned int revalidator_thread_id,
     fprintf(fp, "%"PRIu64",", perf_stats->measure_cnt);
     fprintf(fp, "%ld,", tv.tv_sec);
     fprintf(fp, "%"PRIu64",", time_interval);
-    fprintf(fp, "%u", revalidator_thread_id);
+    fprintf(fp, "%u,", revalidator_thread_id);
     fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_FLOW_NUM]); 
     fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_FLOW_PKTS]); 
     fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_FLOW_BYTES]); 
