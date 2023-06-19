@@ -1118,9 +1118,9 @@ miniflow_extract(struct dp_packet *packet, struct miniflow *dst)
     #ifdef FASTNIC_OFFLOAD
     if (nw_proto == IPPROTO_TCP || nw_proto == IPPROTO_UDP){
         const struct offload_meta *ofm = data;
-        packet->of_meta.flow_size = ofm->flow_size;   
-        packet->of_meta.pkt_seq = ofm->pkt_seq;   
-        packet->of_meta.timestamp = ofm->timestamp;   
+        packet->of_meta.flow_size = htonl(ofm->flow_size);   
+        packet->of_meta.pkt_seq = htonl(ofm->pkt_seq);   
+        packet->of_meta.timestamp = htobe64(ofm->timestamp);   
     }
     #endif
  out:
