@@ -3946,17 +3946,17 @@ fastnic_dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     ds_put_char(&extra_info, ')');
     flow->dp_extra_info = ds_steal_cstr(&extra_info);
     ds_destroy(&extra_info);
-    
+
+    #ifndef FASTNIC_OFF_IGNO
+    cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
+                dp_netdev_flow_hash(&flow->ufid));
+    #endif
     #ifdef FASTNIC_OFFLOAD
     if(pkt_seq >= OFFLOAD_THRE){
-            cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
-                        dp_netdev_flow_hash(&flow->ufid));
             queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
                           orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
     }
     #else
-    cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
-                dp_netdev_flow_hash(&flow->ufid));
     queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
                           orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
     #endif
@@ -8000,12 +8000,7 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
         }
         ovs_mutex_unlock(&pmd->flow_mutex);
         uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
-        #ifdef FASTNIC_OFFLOAD
-        if(pkt_seq >= OFFLOAD_THRE){
-            smc_insert(pmd, key, hash);
-            emc_probabilistic_insert(pmd, key, netdev_flow);
-        }
-        #else
+        #ifndef FASTNIC_OFF_IGNO
         smc_insert(pmd, key, hash);
         emc_probabilistic_insert(pmd, key, netdev_flow);
         #endif
@@ -8118,9 +8113,11 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
 
         flow = dp_netdev_flow_cast(rules[i]);
         uint32_t hash =  dp_netdev_flow_hash(&flow->ufid);
+        #ifndef FASTNIC_OFF_IGNO
         smc_insert(pmd, keys[i], hash);
 
         emc_probabilistic_insert(pmd, keys[i], flow);
+        #endif
         /* Add these packets into the flow map in the same order
          * as received.
          */
