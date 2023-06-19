@@ -7999,8 +7999,15 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
         }
         ovs_mutex_unlock(&pmd->flow_mutex);
         uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
+        #ifdef FASTNIC_OFFLOAD
+        if(pkt_seq > OFFLOAD_THRE){
+            smc_insert(pmd, key, hash);
+            emc_probabilistic_insert(pmd, key, netdev_flow);
+        }
+        #else
         smc_insert(pmd, key, hash);
         emc_probabilistic_insert(pmd, key, netdev_flow);
+        #endif
     }
     if (pmd_perf_metrics_enabled(pmd)) {
         /* Update upcall stats. */
