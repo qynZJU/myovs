@@ -63,8 +63,11 @@ extern "C" {
  * cache.
  * If dp_netdev_input is not called from a pmd thread, a mutex is used.
  */
-
+#ifdef FASTNIC_OFFLOAD
+#define EM_FLOW_HASH_SHIFT 16
+#else
 #define EM_FLOW_HASH_SHIFT 13
+#endif
 #define EM_FLOW_HASH_ENTRIES (1u << EM_FLOW_HASH_SHIFT)
 #define EM_FLOW_HASH_MASK (EM_FLOW_HASH_ENTRIES - 1)
 #define EM_FLOW_HASH_SEGS 2
@@ -93,6 +96,9 @@ struct dpcls_rule;
 struct emc_entry {
     struct dp_netdev_flow *flow;
     struct netdev_flow_key key;   /* key.hash used for emc hash value. */
+    #ifdef FASTNIC_OFFLOAD
+    uint64_t counter;
+    #endif
 };
 
 struct emc_cache {
@@ -164,6 +170,29 @@ emc_lookup(struct emc_cache *cache, const struct netdev_flow_key *key)
 
     return NULL;
 }
+
+#ifdef FASTNIC_OFFLOAD
+static inline struct dp_netdev_flow *
+fastnic_emc_lookup(struct emc_cache *cache, const struct netdev_flow_key *key, uint64_t *pkt_seq)
+{
+    struct emc_entry *current_entry;
+
+    EMC_FOR_EACH_POS_WITH_HASH (cache, current_entry, key->hash) {
+        if (current_entry->key.hash == key->hash
+            && emc_entry_alive(current_entry)
+            && emc_flow_key_equal_mf(&current_entry->key, &key->mf)) {
+            #ifdef FASTNIC_OFFLOAD
+            current_entry->counter++;
+            *pkt_seq = current_entry->counter;
+            #endif
+            /* We found the entry with the 'key->mf' miniflow */
+            return current_entry->flow;
+        }
+    }
+
+    return NULL;
+}
+#endif
 
 /* Insert a batch of keys/flows into the EMC and SMC caches. */
 void

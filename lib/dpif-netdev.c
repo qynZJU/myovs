@@ -7552,7 +7552,11 @@ smc_lookup_batch(struct dp_netdev_pmd_thread *pmd,
                     /* SMC hit and emc miss, we insert into EMC */
                     keys[i].len =
                         netdev_flow_key_size(miniflow_n_values(&keys[i].mf));
+                    #ifdef FASTNIC_OFFLOAD
+                    emc_insert(&(pmd->flow_cache).emc_cache, &keys[i], flow);
+                    #else
                     emc_probabilistic_insert(pmd, &keys[i], flow);
+                    #endif
                     /* Add these packets into the flow map in the same order
                      * as received.
                      */
@@ -7641,6 +7645,219 @@ dp_netdev_hw_flow(const struct dp_netdev_pmd_thread *pmd,
     return 0;
 }
 
+#ifdef FASTNIC_OFFLOAD
+static struct dp_netdev_flow *
+dp_netdev_hw_flow_add(struct dp_netdev_pmd_thread *pmd,
+                   struct match *match, const ovs_u128 *ufid,
+                   const struct nlattr *actions, size_t actions_len,
+                   odp_port_t orig_in_port)
+    OVS_REQUIRES(pmd->flow_mutex)
+{
+    struct ds extra_info = DS_EMPTY_INITIALIZER;
+    struct dp_netdev_flow *flow;
+    struct netdev_flow_key mask;
+    struct dpcls *cls;
+    size_t unit;
+
+    /* Make sure in_port is exact matched before we read it. */
+    ovs_assert(match->wc.masks.in_port.odp_port == ODPP_NONE);
+    odp_port_t in_port = match->flow.in_port.odp_port;
+
+    /* As we select the dpcls based on the port number, each netdev flow
+     * belonging to the same dpcls will have the same odp_port value.
+     * For performance reasons we wildcard odp_port here in the mask.  In the
+     * typical case dp_hash is also wildcarded, and the resulting 8-byte
+     * chunk {dp_hash, in_port} will be ignored by netdev_flow_mask_init() and
+     * will not be part of the subtable mask.
+     * This will speed up the hash computation during dpcls_lookup() because
+     * there is one less call to hash_add64() in this case. */
+    match->wc.masks.in_port.odp_port = 0;
+    netdev_flow_mask_init(&mask, match);
+    match->wc.masks.in_port.odp_port = ODPP_NONE;
+
+    /* Make sure wc does not have metadata. */
+    ovs_assert(!FLOWMAP_HAS_FIELD(&mask.mf.map, metadata)
+               && !FLOWMAP_HAS_FIELD(&mask.mf.map, regs));
+
+    /* Do not allocate extra space. */
+    flow = xmalloc(sizeof *flow - sizeof flow->cr.flow.mf + mask.len);
+    memset(&flow->stats, 0, sizeof flow->stats);
+    atomic_init(&flow->netdev_flow_get_result, 0);
+    memset(&flow->last_stats, 0, sizeof flow->last_stats);
+    memset(&flow->last_attrs, 0, sizeof flow->last_attrs);
+    flow->dead = false;
+    flow->batch = NULL;
+    flow->mark = INVALID_FLOW_MARK;
+    *CONST_CAST(unsigned *, &flow->pmd_id) = pmd->core_id;
+    *CONST_CAST(struct flow *, &flow->flow) = match->flow;
+    *CONST_CAST(ovs_u128 *, &flow->ufid) = *ufid;
+    ovs_refcount_init(&flow->ref_cnt);
+    ovsrcu_set(&flow->actions, dp_netdev_actions_create(actions, actions_len));
+
+    dp_netdev_get_mega_ufid(match, CONST_CAST(ovs_u128 *, &flow->mega_ufid));
+    netdev_flow_key_init_masked(&flow->cr.flow, &match->flow, &mask);
+
+    /* Select dpcls for in_port. Relies on in_port to be exact match. */
+    cls = dp_netdev_pmd_find_dpcls(pmd, in_port);
+    dpcls_insert(cls, &flow->cr, &mask);
+
+    ds_put_cstr(&extra_info, "miniflow_bits(");
+    FLOWMAP_FOR_EACH_UNIT (unit) {
+        if (unit) {
+            ds_put_char(&extra_info, ',');
+        }
+        ds_put_format(&extra_info, "%d",
+                      count_1bits(flow->cr.mask->mf.map.bits[unit]));
+    }
+    ds_put_char(&extra_info, ')');
+    flow->dp_extra_info = ds_steal_cstr(&extra_info);
+    ds_destroy(&extra_info);
+
+    // cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
+    //             dp_netdev_flow_hash(&flow->ufid));
+
+    queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
+                          orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
+
+    // if (OVS_UNLIKELY(!VLOG_DROP_DBG((&upcall_rl)))) {
+    //     struct ds ds = DS_EMPTY_INITIALIZER;
+    //     struct ofpbuf key_buf, mask_buf;
+    //     struct odp_flow_key_parms odp_parms = {
+    //         .flow = &match->flow,
+    //         .mask = &match->wc.masks,
+    //         .support = dp_netdev_support,
+    //     };
+
+    //     ofpbuf_init(&key_buf, 0);
+    //     ofpbuf_init(&mask_buf, 0);
+
+    //     odp_flow_key_from_flow(&odp_parms, &key_buf);
+    //     odp_parms.key_buf = &key_buf;
+    //     odp_flow_key_from_mask(&odp_parms, &mask_buf);
+
+    //     ds_put_cstr(&ds, "flow_add: ");
+    //     odp_format_ufid(ufid, &ds);
+    //     ds_put_cstr(&ds, " mega_");
+    //     odp_format_ufid(&flow->mega_ufid, &ds);
+    //     ds_put_cstr(&ds, " ");
+    //     odp_flow_format(key_buf.data, key_buf.size,
+    //                     mask_buf.data, mask_buf.size,
+    //                     NULL, &ds, false);
+    //     ds_put_cstr(&ds, ", actions:");
+    //     format_odp_actions(&ds, actions, actions_len, NULL);
+
+    //     VLOG_DBG("%s", ds_cstr(&ds));
+
+    //     ofpbuf_uninit(&key_buf);
+    //     ofpbuf_uninit(&mask_buf);
+
+    //     /* Add a printout of the actual match installed. */
+    //     struct match m;
+    //     ds_clear(&ds);
+    //     ds_put_cstr(&ds, "flow match: ");
+    //     miniflow_expand(&flow->cr.flow.mf, &m.flow);
+    //     miniflow_expand(&flow->cr.mask->mf, &m.wc.masks);
+    //     memset(&m.tun_md, 0, sizeof m.tun_md);
+    //     match_format(&m, NULL, &ds, OFP_DEFAULT_PRIORITY);
+
+    //     VLOG_DBG("%s", ds_cstr(&ds));
+
+    //     ds_destroy(&ds);
+    // }
+
+    return flow;
+}
+
+static inline int
+dp_netdev_hw_flow_off(struct dp_netdev_pmd_thread *pmd,
+                     struct dp_packet *packet,
+                     const struct netdev_flow_key *key,
+                     struct ofpbuf *actions, struct ofpbuf *put_actions)
+{
+    struct ofpbuf *add_actions;
+    // struct dp_packet_batch b;
+    struct match match;
+    ovs_u128 ufid;
+    int error;
+    // uint64_t cycles = cycles_counter_update(&pmd->perf_stats);
+    odp_port_t orig_in_port = packet->md.orig_in_port;
+
+    match.tun_md.valid = false;
+    miniflow_expand(&key->mf, &match.flow);
+    memset(&match.wc, 0, sizeof match.wc);
+
+    ofpbuf_clear(actions);
+    ofpbuf_clear(put_actions);
+
+    odp_flow_key_hash(&match.flow, sizeof match.flow, &ufid);
+    error = dp_netdev_upcall(pmd, packet, &match.flow, &match.wc,
+                             &ufid, DPIF_UC_MISS, NULL, actions,
+                             put_actions);
+    if (OVS_UNLIKELY(error && error != ENOSPC)) {
+        dp_packet_delete(packet);
+        COVERAGE_INC(datapath_drop_upcall_error);
+        return error;
+    }
+
+    /* The Netlink encoding of datapath flow keys cannot express
+     * wildcarding the presence of a VLAN tag. Instead, a missing VLAN
+     * tag is interpreted as exact match on the fact that there is no
+     * VLAN.  Unless we refactor a lot of code that translates between
+     * Netlink and struct flow representations, we have to do the same
+     * here.  This must be in sync with 'match' in dpif_netdev_flow_put(). */
+    if (!match.wc.masks.vlans[0].tci) {
+        match.wc.masks.vlans[0].tci = htons(0xffff);
+    }
+
+    // /* We can't allow the packet batching in the next loop to execute
+    //  * the actions.  Otherwise, if there are any slow path actions,
+    //  * we'll send the packet up twice. */
+    // dp_packet_batch_init_packet(&b, packet);
+    // dp_netdev_execute_actions(pmd, &b, true, &match.flow,
+    //                           actions->data, actions->size);
+
+    add_actions = put_actions->size ? put_actions : actions;
+    if (OVS_LIKELY(error != ENOSPC)) {
+        struct dp_netdev_flow *netdev_flow;
+
+        /* XXX: There's a race window where a flow covering this packet
+         * could have already been installed since we last did the flow
+         * lookup before upcall.  This could be solved by moving the
+         * mutex lock outside the loop, but that's an awful long time
+         * to be locking revalidators out of making flow modifications. */
+        ovs_mutex_lock(&pmd->flow_mutex);
+        // netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL);
+        // if (OVS_LIKELY(!netdev_flow)) {
+        //     netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid,
+        //                                      add_actions->data,
+        //                                      add_actions->size, orig_in_port);
+        // }
+        netdev_flow = dp_netdev_hw_flow_add(pmd, &match, &ufid,
+                                         add_actions->data,
+                                         add_actions->size, orig_in_port);
+        ovs_mutex_unlock(&pmd->flow_mutex);
+        // uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
+        // smc_insert(pmd, key, hash);
+        // #ifdef FASTNIC_OFFLOAD
+        // emc_insert(&(pmd->flow_cache).emc_cache, key, netdev_flow);
+        // #else
+        // emc_probabilistic_insert(pmd, key, netdev_flow);
+        // #endif
+    }
+    // if (pmd_perf_metrics_enabled(pmd)) {
+    //     /* Update upcall stats. */
+    //     cycles = cycles_counter_update(&pmd->perf_stats) - cycles;
+    //     struct pmd_perf_stats *s = &pmd->perf_stats;
+    //     s->current.upcalls++;
+    //     s->current.upcall_cycles += cycles;
+    //     histogram_add_sample(&s->cycles_per_upcall, cycles);
+    // }
+    return error;
+}
+
+
+#endif
+
 /* Try to process all ('cnt') the 'packets' using only the datapath flow cache
  * 'pmd->flow_cache'. If a flow is not found for a packet 'packets[i]', the
  * miniflow is copied into 'keys' and the packet pointer is moved at the
@@ -7682,6 +7899,14 @@ dfc_processing(struct dp_netdev_pmd_thread *pmd,
     pmd_perf_update_counter(&pmd->perf_stats,
                             md_is_valid ? PMD_STAT_RECIRC : PMD_STAT_RECV,
                             cnt);
+
+    #ifdef FASTNIC_OFFLOAD
+    uint64_t actions_stub[512 / 8], slow_stub[512 / 8];
+    struct ofpbuf actions, put_actions;
+
+    ofpbuf_use_stub(&actions, actions_stub, sizeof actions_stub);
+    ofpbuf_use_stub(&put_actions, slow_stub, sizeof slow_stub);
+    #endif
 
     DP_PACKET_BATCH_REFILL_FOR_EACH (i, cnt, packet, packets_) {
         struct dp_netdev_flow *flow;
@@ -7736,10 +7961,20 @@ dfc_processing(struct dp_netdev_pmd_thread *pmd,
                 : dpif_netdev_packet_get_rss_hash(packet, &key->mf);
 
         /* If EMC is disabled skip emc_lookup */
+        #ifdef FASTNIC_OFFLOAD
+        uint64_t pkt_seq;
+        flow = (cur_min != 0) ? fastnic_emc_lookup(&cache->emc_cache, key, &pkt_seq) : NULL;
+        #else
         flow = (cur_min != 0) ? emc_lookup(&cache->emc_cache, key) : NULL;
+        #endif
         if (OVS_LIKELY(flow)) {
             tcp_flags = miniflow_get_tcp_flags(&key->mf);
             n_emc_hit++;
+            #ifdef FASTNIC_OFFLOAD
+            if(pkt_seq >= OFFLOAD_THRE){
+                dp_netdev_hw_flow_off(pmd, packet, key, &actions, &put_actions);
+            }
+            #endif
             if (OVS_LIKELY(batch_enable)) {
                 dp_netdev_queue_batches(packet, flow, tcp_flags, batches,
                                         n_batches);
@@ -7772,6 +8007,11 @@ dfc_processing(struct dp_netdev_pmd_thread *pmd,
             batch_enable = false;
         }
     }
+
+    #ifdef FASTNIC_OFFLOAD
+    ofpbuf_uninit(&actions);
+    ofpbuf_uninit(&put_actions);
+    #endif
     /* Count of packets which are not flow batched. */
     *n_flows = map_cnt;
 
@@ -7858,7 +8098,11 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
         ovs_mutex_unlock(&pmd->flow_mutex);
         uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
         smc_insert(pmd, key, hash);
+        #ifdef FASTNIC_OFFLOAD
+        emc_insert(&(pmd->flow_cache).emc_cache, key, netdev_flow);
+        #else
         emc_probabilistic_insert(pmd, key, netdev_flow);
+        #endif
     }
     if (pmd_perf_metrics_enabled(pmd)) {
         /* Update upcall stats. */
@@ -7969,8 +8213,11 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
         flow = dp_netdev_flow_cast(rules[i]);
         uint32_t hash =  dp_netdev_flow_hash(&flow->ufid);
         smc_insert(pmd, keys[i], hash);
-
+        #ifdef FASTNIC_OFFLOAD
+        emc_insert(&(pmd->flow_cache).emc_cache, keys[i], flow);
+        #else
         emc_probabilistic_insert(pmd, keys[i], flow);
+        #endif
         /* Add these packets into the flow map in the same order
          * as received.
          */
