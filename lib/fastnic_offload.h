@@ -3,7 +3,7 @@
 
 #include "flow.h"
 
-#define FASTNIC_OFFLOAD 1 //only support tcp & udp now
+//#define FASTNIC_OFFLOAD 1 //only support tcp & udp now
 #define OFFLOAD_THRE 10 
 
 //qq 待施工

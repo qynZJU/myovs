@@ -3956,8 +3956,8 @@ fastnic_dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
                           orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
     }
     #else
-    queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
-                          orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
+//    queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
+//                          orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
     #endif
 
     if (OVS_UNLIKELY(!VLOG_DROP_DBG((&upcall_rl)))) {
