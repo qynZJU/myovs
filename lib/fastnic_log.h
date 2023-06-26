@@ -10,7 +10,7 @@
 #endif
 
 #define FASTNIC_LOG
-// #define HW_FASTNIC_LOG
+#define HW_FASTNIC_LOG
 
 enum fastnic_pmd_stat_type {
     OFFLOAD_CREATE_PMD, /* call queue_netdev_flow_put */
