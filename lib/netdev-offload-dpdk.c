@@ -655,7 +655,7 @@ netdev_offload_dpdk_flow_create(struct netdev *netdev,
 
     flow = netdev_dpdk_rte_flow_create(netdev, attr, items, actions, error);
     if (flow) {
-        #ifdef FASTNIC_LOG
+        #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
         fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_RTE_OK, 1);
         #endif
         if (!VLOG_DROP_DBG(&rl)) {
@@ -666,7 +666,7 @@ netdev_offload_dpdk_flow_create(struct netdev *netdev,
                         netdev_dpdk_get_port_id(netdev), ds_cstr(&s));
         }
     } else {
-        #ifdef FASTNIC_LOG
+        #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
         fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_RTE_FAIL, 1);
         #endif
         enum vlog_level level = VLL_WARN;
@@ -1908,7 +1908,9 @@ netdev_offload_dpdk_flow_destroy(struct ufid_to_rte_flow_data *rte_flow_data)
     ret = netdev_dpdk_rte_flow_destroy(physdev, rte_flow, &error);
 
     if (ret == 0) {
+        #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
         fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_RTE_OK, 1);
+        #endif
         ufid_to_rte_flow_disassociate(rte_flow_data);
         VLOG_DBG_RL(&rl, "%s/%s: rte_flow 0x%"PRIxPTR
                     " flow destroy %d ufid " UUID_FMT,
@@ -1917,7 +1919,7 @@ netdev_offload_dpdk_flow_destroy(struct ufid_to_rte_flow_data *rte_flow_data)
                     netdev_dpdk_get_port_id(physdev),
                     UUID_ARGS((struct uuid *) ufid));
     } else {
-        #ifdef FASTNIC_LOG
+        #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
         fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_RTE_FAIL, 1);
         #endif
         VLOG_ERR("Failed flow: %s/%s: flow destroy %d ufid " UUID_FMT,

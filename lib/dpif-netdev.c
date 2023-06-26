@@ -2660,14 +2660,14 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
     const char *op;
     int ret;
 
-    #ifdef FASTNIC_LOG
+    #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
     if (OVS_UNLIKELY(fastnic_offload_stats.init == false)){
         fastnic_offload_perf_stats_init(&fastnic_offload_stats);
     }
     #endif
 
     for (;;) {
-        #ifdef FASTNIC_LOG
+        #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
         fastnic_offload_perf_start_offloaditeration(&fastnic_offload_stats);
         #endif
         ovs_mutex_lock(&dp_flow_offload.mutex);
@@ -2684,7 +2684,7 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
         uint64_t start, end;
         switch (offload->op) {
         case DP_NETDEV_FLOW_OFFLOAD_OP_ADD:
-            #ifdef FASTNIC_LOG
+            #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
             start = cycles_cnt_update();
             op = "add";
             ret = dp_netdev_flow_offload_put(offload);
@@ -2706,7 +2706,7 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
             #endif
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_MOD:
-            #ifdef FASTNIC_LOG
+            #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
             start = cycles_cnt_update();
             op = "modify";
             ret = dp_netdev_flow_offload_put(offload);
@@ -2728,7 +2728,7 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
             #endif
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_DEL:
-            #ifdef FASTNIC_LOG
+            #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
             start = cycles_cnt_update();
             op = "delete";
             ret = dp_netdev_flow_offload_del(offload);

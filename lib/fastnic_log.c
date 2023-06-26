@@ -23,9 +23,11 @@
 
 VLOG_DEFINE_THIS_MODULE(fastnic_log);
 
+#ifdef HW_FASTNIC_LOG
 struct fastnic_offload_perf_stats fastnic_offload_stats = {
     .init = false,
 };
+#endif
 
 static void now_time_log(pthread_t thread_id);
 static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_stat_type counter);
@@ -36,12 +38,16 @@ static void fastnic_pmd_perf_stats_clear_lock(struct fastnic_pmd_perf_stats *s);
 static void fastnic_pmd_perf_stats_clear(struct fastnic_pmd_perf_stats *s);
 static void fastnic_pmd_perf_read_counters(const struct fastnic_pmd_perf_stats *s, 
                                            uint64_t stats[FASTNIC_PMD_N_STATS]);
+#ifdef HW_FASTNIC_LOG
 static void fastnic_offload_perf_stats_clear_lock(struct fastnic_offload_perf_stats *s);
 static void fastnic_offload_perf_stats_clear(struct fastnic_offload_perf_stats *s);
 static void fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s, 
                                                uint64_t stats[FASTNIC_OFFLOAD_N_STATS]);
+#endif
 static void fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd);
+#ifdef HW_FASTNIC_LOG
 static void fastnic_offload_sta(void);
+#endif
 static void fastnic_reval_perf_stats_clear_lock(struct fastnic_revalidate_perf_stats *s);
 static void fastnic_reval_perf_stats_clear(struct fastnic_revalidate_perf_stats *s);
 static void fastnic_reval_perf_read_counters(const struct fastnic_revalidate_perf_stats *s,
@@ -409,6 +415,7 @@ fastnic_pmd_perf_read_counters(const struct fastnic_pmd_perf_stats *s,
     }
 }
 
+#ifdef HW_FASTNIC_LOG
 //change from lib/dpif-netdev-perf.c:pmd_perf_stats_init
 void
 fastnic_offload_perf_stats_init(struct fastnic_offload_perf_stats *s)
@@ -489,6 +496,7 @@ fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s,
     }
 }
 
+#endif
 // change from lib/dpif-netdev.c:pmd_info_show_stats
 static void
 fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd) 
@@ -527,6 +535,7 @@ fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd)
     fclose(fp);
 }
 
+#ifdef HW_FASTNIC_LOG
 // change from lib/dpif-netdev.c:pmd_info_show_stats
 static void
 fastnic_offload_sta(void) 
@@ -602,6 +611,7 @@ fastnic_offload_sta(void)
     
     fclose(fp);
 }
+#endif
 
 //change from lib/dpif-netdev-perf.c:pmd_perf_stats_init
 void
@@ -782,11 +792,13 @@ print_log(pthread_t revalidator_thread_id)
     }
     free(pmd_list);
 
+    #ifdef HW_FASTNIC_LOG
     if(pkt_active_flag == true){
         fastnic_offload_sta();
     }
     fastnic_offload_perf_stats_clear(&fastnic_offload_stats);
     fastnic_offload_stats.measure_cnt++;
+    #endif
 
     return 0;
 }

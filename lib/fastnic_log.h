@@ -10,6 +10,7 @@
 #endif
 
 #define FASTNIC_LOG
+// #define HW_FASTNIC_LOG
 
 enum fastnic_pmd_stat_type {
     OFFLOAD_CREATE_PMD, /* call queue_netdev_flow_put */
@@ -160,8 +161,10 @@ extern struct fastnic_offload_perf_stats fastnic_offload_stats;
 
 void fastnic_pmd_perf_stats_init(struct fastnic_pmd_perf_stats *s);
 void fastnic_pmd_perf_start_pmditeration(struct fastnic_pmd_perf_stats *s);
+#ifdef HW_FASTNIC_LOG
 void fastnic_offload_perf_stats_init(struct fastnic_offload_perf_stats *s);
 void fastnic_offload_perf_start_offloaditeration(struct fastnic_offload_perf_stats *s);
+#endif
 void fastnic_reval_perf_stats_init(struct fastnic_revalidate_perf_stats *s);
 void fastnic_revel_perf_start_revaliteration(struct fastnic_revalidate_perf_stats *s);
 void fastnic_reval_perf_update_counters(struct fastnic_revalidate_perf_stats *s,
