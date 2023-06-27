@@ -9,7 +9,7 @@
 #include <rte_cycles.h>
 #endif
 
-// #define FASTNIC_LOG
+#define FASTNIC_LOG
 #define HW_FASTNIC_LOG
 
 enum fastnic_pmd_stat_type {
