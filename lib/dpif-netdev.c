@@ -6596,7 +6596,6 @@ pmd_thread_main(void *f_)
 {
     struct dp_netdev_pmd_thread *pmd = f_;
     struct pmd_perf_stats *s = &pmd->perf_stats;
-    struct fastnic_pmd_perf_stats *fastnic_s = &pmd->fastnic_stats;
     unsigned int lc = 0;
     struct polled_queue *poll_list;
     bool wait_for_reload = false;
@@ -6606,6 +6605,9 @@ pmd_thread_main(void *f_)
     int poll_cnt;
     int i;
     int process_packets = 0;
+    #ifdef FASTNIC_LOG
+    struct fastnic_pmd_perf_stats *fastnic_s = &pmd->fastnic_stats;
+    #endif
 
     poll_list = NULL;
 
@@ -6656,7 +6658,9 @@ reload:
 
     /* Protect pmd stats from external clearing while polling. */
     ovs_mutex_lock(&pmd->perf_stats.stats_mutex);
+    #ifdef FASTNIC_LOG
     ovs_mutex_lock(&pmd->fastnic_stats.stats_mutex);
+    #endif
     for (;;) {
         uint64_t rx_packets = 0, tx_packets = 0;
 
@@ -6734,8 +6738,10 @@ reload:
         pmd_perf_end_iteration(s, rx_packets, tx_packets,
                                pmd_perf_metrics_enabled(pmd));
     }
-    ovs_mutex_unlock(&pmd->fastnic_stats.stats_mutex);
     ovs_mutex_unlock(&pmd->perf_stats.stats_mutex);
+    #ifdef FASTNIC_LOG
+    ovs_mutex_unlock(&pmd->fastnic_stats.stats_mutex);
+    #endif
 
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);
     atomic_read_relaxed(&pmd->wait_for_reload, &wait_for_reload);
