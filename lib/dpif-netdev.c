@@ -33,6 +33,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #include "bitmap.h"
 #include "cmap.h"
@@ -347,6 +348,10 @@ struct dp_flow_offload_item {
     odp_port_t orig_in_port; /* Originating in_port for tnl flows. */
 
     struct ovs_list node;
+
+    #ifdef OCT_FASTNIC_LOG
+    struct  timeval insert_time;
+    #endif
 };
 
 struct dp_flow_offload {
@@ -2682,6 +2687,8 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
         ovs_mutex_unlock(&dp_flow_offload.mutex);
 
         uint64_t start, end;
+        struct timeval time_now;
+
         switch (offload->op) {
         case DP_NETDEV_FLOW_OFFLOAD_OP_ADD:
             #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
@@ -2689,12 +2696,23 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
             op = "add";
             ret = dp_netdev_flow_offload_put(offload);
             end = cycles_cnt_update();
+            #ifdef OCT_FASTNIC_LOG
+            gettimeofday(&time_now, NULL);
+            #endif
             if (ret == 0) {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, PUT_OK_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK, 1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK_CYCLE, end-start);
                 }
             } else {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, PUT_FAIL_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL,1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL_CYCLE, end-start);
@@ -2711,12 +2729,23 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
             op = "modify";
             ret = dp_netdev_flow_offload_put(offload);
             end = cycles_cnt_update();
+            #ifdef OCT_FASTNIC_LOG
+            gettimeofday(&time_now, NULL);
+            #endif
             if (ret == 0) {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, MOD_OK_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK, 1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK_CYCLE, end-start);
                 }
             } else {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, MOD_FAIL_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL,1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL_CYCLE, end-start);
@@ -2733,12 +2762,23 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
             op = "delete";
             ret = dp_netdev_flow_offload_del(offload);
             end = cycles_cnt_update();
+            #ifdef OCT_FASTNIC_LOG
+            gettimeofday(&time_now, NULL);
+            #endif
             if (ret == 0) {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, DEL_OK_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK, 1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK_CYCLE, end-start);
                 }
             } else {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, DEL_FAIL_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL,1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL_CYCLE, end-start);
@@ -2778,6 +2818,12 @@ queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
 
     offload = dp_netdev_alloc_flow_offload(pmd, flow,
                                            DP_NETDEV_FLOW_OFFLOAD_OP_DEL);
+    #ifdef OCT_FASTNIC_LOG
+    struct timeval time_now;
+    gettimeofday(&time_now, NULL);
+    offload->insert_time.tv_sec = time_now.tv_sec;
+    offload->insert_time.tv_usec = time_now.tv_usec;
+    #endif
     dp_netdev_append_flow_offload(offload);
 
     #ifdef FASTNIC_LOG
@@ -2810,6 +2856,13 @@ queue_netdev_flow_put(struct dp_netdev_pmd_thread *pmd,
     memcpy(offload->actions, actions, actions_len);
     offload->actions_len = actions_len;
     offload->orig_in_port = orig_in_port;
+
+    #ifdef OCT_FASTNIC_LOG
+    struct timeval time_now;
+    gettimeofday(&time_now, NULL);
+    offload->insert_time.tv_sec = time_now.tv_sec;
+    offload->insert_time.tv_usec = time_now.tv_usec;
+    #endif
 
     dp_netdev_append_flow_offload(offload);
 

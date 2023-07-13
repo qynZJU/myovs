@@ -38,22 +38,21 @@ static void fastnic_pmd_perf_stats_clear_lock(struct fastnic_pmd_perf_stats *s);
 static void fastnic_pmd_perf_stats_clear(struct fastnic_pmd_perf_stats *s);
 static void fastnic_pmd_perf_read_counters(const struct fastnic_pmd_perf_stats *s, 
                                            uint64_t stats[FASTNIC_PMD_N_STATS]);
-#ifdef HW_FASTNIC_LOG
-static void fastnic_offload_perf_stats_clear_lock(struct fastnic_offload_perf_stats *s);
-static void fastnic_offload_perf_stats_clear(struct fastnic_offload_perf_stats *s);
-static void fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s, 
-                                               uint64_t stats[FASTNIC_OFFLOAD_N_STATS]);
-#endif
 static void fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd);
-#ifdef HW_FASTNIC_LOG
-static void fastnic_offload_sta(void);
-#endif
 static void fastnic_reval_perf_stats_clear_lock(struct fastnic_revalidate_perf_stats *s);
 static void fastnic_reval_perf_stats_clear(struct fastnic_revalidate_perf_stats *s);
 static void fastnic_reval_perf_read_counters(const struct fastnic_revalidate_perf_stats *s,
                                              uint64_t stats[FASTNIC_REVALIDATE_N_STATS]);
 static void fastnic_reval_sta(unsigned int revalidator_thread_id,
                               struct fastnic_revalidate_perf_stats *perf_stats);
+
+#ifdef HW_FASTNIC_LOG
+static void fastnic_offload_perf_stats_clear_lock(struct fastnic_offload_perf_stats *s);
+static void fastnic_offload_perf_stats_clear(struct fastnic_offload_perf_stats *s);
+static void fastnic_offload_perf_read_counters(const struct fastnic_offload_perf_stats *s, 
+                                               uint64_t stats[FASTNIC_OFFLOAD_N_STATS]);
+static void fastnic_offload_sta(void);
+#endif
 
 static void
 now_time_log(pthread_t thread_id){
@@ -557,7 +556,10 @@ fastnic_offload_sta(void)
                     put_ok,put_fail,mod_ok,mod_fail,rte_create_ok,rte_create_fail,\
                     del_ok,del_fail,rte_del_ok,rte_del_fail,\
                     put_ok_cycle,put_fail_cycle,mod_ok_cycle,mod_fail_cycle,\
-                    del_ok_cycle,del_fail_cycle\r\n");
+                    del_ok_cycle,del_fail_cycle,\
+                    putok_complete_time/us,putfail_complete_time/us,\
+                    modok_complete_time/us,modfail_complete_time/us,\
+                    delok_complete_time/us,delfail_complete_time/us\r\n");
     } else {
         fp = fopen(fastnic_offload_stats_file, "a+");
     }
@@ -568,23 +570,33 @@ fastnic_offload_sta(void)
     uint64_t put_ok_cycle = 0, put_fail_cycle = 0;
     uint64_t mod_ok_cycle = 0, mod_fail_cycle = 0;
     uint64_t del_ok_cycle = 0, del_fail_cycle = 0;
+    uint64_t put_ok_time = 0, put_fail_time = 0;
+    uint64_t mod_ok_time = 0, mod_fail_time = 0;
+    uint64_t del_ok_time = 0, del_fail_time = 0;
+
 
     if (stats_offload[OFFLOAD_CREATE_PUT_OK] != 0) {
+        put_ok_time = stats_offload[PUT_OK_TIME] / stats_offload[OFFLOAD_CREATE_PUT_OK];
         put_ok_cycle = stats_offload[OFFLOAD_CREATE_PUT_OK_CYCLE] / stats_offload[OFFLOAD_CREATE_PUT_OK];
     }
     if (stats_offload[OFFLOAD_CREATE_PUT_FAIL] != 0) {
+        put_fail_time = stats_offload[PUT_FAIL_TIME]/stats_offload[OFFLOAD_CREATE_PUT_FAIL];
         put_fail_cycle = stats_offload[OFFLOAD_CREATE_PUT_FAIL_CYCLE] / stats_offload[OFFLOAD_CREATE_PUT_FAIL];
     }
     if (stats_offload[OFFLOAD_CREATE_MOD_OK] != 0) {
+        mod_ok_time= stats_offload[MOD_OK_TIME]/stats_offload[OFFLOAD_CREATE_MOD_OK];
         mod_ok_cycle = stats_offload[OFFLOAD_CREATE_MOD_OK_CYCLE] / stats_offload[OFFLOAD_CREATE_MOD_OK];
     }      
     if (stats_offload[OFFLOAD_CREATE_MOD_FAIL] != 0) {
+        mod_fail_time= stats_offload[MOD_FAIL_TIME]/stats_offload[OFFLOAD_CREATE_MOD_FAIL];
         mod_fail_cycle = stats_offload[OFFLOAD_CREATE_MOD_FAIL_CYCLE] / stats_offload[OFFLOAD_CREATE_MOD_FAIL];
     }        
     if (stats_offload[OFFLOAD_DEL_API_OK] != 0) {
+        del_ok_time= stats_offload[DEL_OK_TIME]/stats_offload[OFFLOAD_DEL_API_OK];
         del_ok_cycle = stats_offload[OFFLOAD_DEL_API_OK_CYCLE] / stats_offload[OFFLOAD_DEL_API_OK];
     }        
     if (stats_offload[OFFLOAD_DEL_API_FAIL] != 0) {
+        del_fail_time= stats_offload[DEL_FAIL_TIME]/stats_offload[OFFLOAD_DEL_API_FAIL];
         del_fail_cycle = stats_offload[OFFLOAD_DEL_API_FAIL_CYCLE] / stats_offload[OFFLOAD_DEL_API_FAIL];
     }
 
@@ -607,7 +619,13 @@ fastnic_offload_sta(void)
     fprintf(fp, "%"PRIu64",", mod_ok_cycle); 
     fprintf(fp, "%"PRIu64",", mod_fail_cycle); 
     fprintf(fp, "%"PRIu64",", del_ok_cycle); 
-    fprintf(fp, "%"PRIu64"\r\n", del_fail_cycle); 
+    fprintf(fp, "%"PRIu64",", del_fail_cycle); 
+    fprintf(fp, "%"PRIu64",", put_ok_time); 
+    fprintf(fp, "%"PRIu64",", put_fail_time); 
+    fprintf(fp, "%"PRIu64",", mod_ok_time); 
+    fprintf(fp, "%"PRIu64",", mod_fail_time); 
+    fprintf(fp, "%"PRIu64",", del_ok_time); 
+    fprintf(fp, "%"PRIu64"\r\n", del_fail_time); 
     
     fclose(fp);
 }

@@ -11,6 +11,7 @@
 
 #define FASTNIC_LOG
 #define HW_FASTNIC_LOG
+#define OCT_FASTNIC_LOG
 
 enum fastnic_pmd_stat_type {
     OFFLOAD_CREATE_PMD, /* call queue_netdev_flow_put */
@@ -81,6 +82,16 @@ enum fastnic_offload_stat_type {
     OFFLOAD_DEL_RTE_FAIL, /**/
     OFFLOAD_DEL_API_OK_CYCLE, /*  cpu cycle when OFFLOAD_DEL_API_OK. below is the same*/
     OFFLOAD_DEL_API_FAIL_CYCLE,
+    
+    #ifdef OCT_FASTNIC_LOG
+    PUT_OK_TIME,
+    PUT_FAIL_TIME,
+    MOD_OK_TIME,
+    MOD_FAIL_TIME,
+    DEL_OK_TIME,
+    DEL_FAIL_TIME,
+    #endif
+
     FASTNIC_OFFLOAD_N_STATS
 };
 
