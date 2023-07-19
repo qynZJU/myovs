@@ -33,6 +33,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #include "bitmap.h"
 #include "cmap.h"
@@ -347,6 +348,10 @@ struct dp_flow_offload_item {
     odp_port_t orig_in_port; /* Originating in_port for tnl flows. */
 
     struct ovs_list node;
+
+    #ifdef OCT_FASTNIC_LOG
+    struct  timeval insert_time;
+    #endif
 };
 
 struct dp_flow_offload {
@@ -2660,14 +2665,14 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
     const char *op;
     int ret;
 
-    #ifdef FASTNIC_LOG
+    #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
     if (OVS_UNLIKELY(fastnic_offload_stats.init == false)){
         fastnic_offload_perf_stats_init(&fastnic_offload_stats);
     }
     #endif
 
     for (;;) {
-        #ifdef FASTNIC_LOG
+        #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
         fastnic_offload_perf_start_offloaditeration(&fastnic_offload_stats);
         #endif
         ovs_mutex_lock(&dp_flow_offload.mutex);
@@ -2682,19 +2687,32 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
         ovs_mutex_unlock(&dp_flow_offload.mutex);
 
         uint64_t start, end;
+        struct timeval time_now;
+
         switch (offload->op) {
         case DP_NETDEV_FLOW_OFFLOAD_OP_ADD:
-            #ifdef FASTNIC_LOG
+            #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
             start = cycles_cnt_update();
             op = "add";
             ret = dp_netdev_flow_offload_put(offload);
             end = cycles_cnt_update();
+            #ifdef OCT_FASTNIC_LOG
+            gettimeofday(&time_now, NULL);
+            #endif
             if (ret == 0) {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, PUT_OK_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK, 1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_OK_CYCLE, end-start);
                 }
             } else {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, PUT_FAIL_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL,1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_PUT_FAIL_CYCLE, end-start);
@@ -2706,17 +2724,28 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
             #endif
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_MOD:
-            #ifdef FASTNIC_LOG
+            #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
             start = cycles_cnt_update();
             op = "modify";
             ret = dp_netdev_flow_offload_put(offload);
             end = cycles_cnt_update();
+            #ifdef OCT_FASTNIC_LOG
+            gettimeofday(&time_now, NULL);
+            #endif
             if (ret == 0) {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, MOD_OK_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK, 1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_OK_CYCLE, end-start);
                 }
             } else {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, MOD_FAIL_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL,1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_CREATE_MOD_FAIL_CYCLE, end-start);
@@ -2728,17 +2757,28 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
             #endif
             break;
         case DP_NETDEV_FLOW_OFFLOAD_OP_DEL:
-            #ifdef FASTNIC_LOG
+            #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
             start = cycles_cnt_update();
             op = "delete";
             ret = dp_netdev_flow_offload_del(offload);
             end = cycles_cnt_update();
+            #ifdef OCT_FASTNIC_LOG
+            gettimeofday(&time_now, NULL);
+            #endif
             if (ret == 0) {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, DEL_OK_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK, 1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_OK_CYCLE, end-start);
                 }
             } else {
+                #ifdef OCT_FASTNIC_LOG
+                uint64_t add_time = (time_now.tv_sec - offload ->insert_time.tv_sec) * 1000000LL + (time_now.tv_usec - offload ->insert_time.tv_usec);
+                fastnic_offload_update_counter(&fastnic_offload_stats, DEL_FAIL_TIME, add_time);
+                #endif
                 fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL,1);
                 if (start < end) {
                     fastnic_offload_update_counter(&fastnic_offload_stats, OFFLOAD_DEL_API_FAIL_CYCLE, end-start);
@@ -2778,6 +2818,12 @@ queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
 
     offload = dp_netdev_alloc_flow_offload(pmd, flow,
                                            DP_NETDEV_FLOW_OFFLOAD_OP_DEL);
+    #ifdef OCT_FASTNIC_LOG
+    struct timeval time_now;
+    gettimeofday(&time_now, NULL);
+    offload->insert_time.tv_sec = time_now.tv_sec;
+    offload->insert_time.tv_usec = time_now.tv_usec;
+    #endif
     dp_netdev_append_flow_offload(offload);
 
     #ifdef FASTNIC_LOG
@@ -2810,6 +2856,13 @@ queue_netdev_flow_put(struct dp_netdev_pmd_thread *pmd,
     memcpy(offload->actions, actions, actions_len);
     offload->actions_len = actions_len;
     offload->orig_in_port = orig_in_port;
+
+    #ifdef OCT_FASTNIC_LOG
+    struct timeval time_now;
+    gettimeofday(&time_now, NULL);
+    offload->insert_time.tv_sec = time_now.tv_sec;
+    offload->insert_time.tv_usec = time_now.tv_usec;
+    #endif
 
     dp_netdev_append_flow_offload(offload);
 
@@ -3878,6 +3931,137 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
 
     return flow;
 }
+
+#ifdef FASTNIC_OFFLOAD
+static struct dp_netdev_flow *
+fastnic_dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
+                   struct match *match, const ovs_u128 *ufid,
+                   const struct nlattr *actions, size_t actions_len,
+                   odp_port_t orig_in_port, struct offload_meta *of_meta)
+    OVS_REQUIRES(pmd->flow_mutex)
+{
+    struct ds extra_info = DS_EMPTY_INITIALIZER;
+    struct dp_netdev_flow *flow;
+    struct netdev_flow_key mask;
+    struct dpcls *cls;
+    size_t unit;
+
+    /* Make sure in_port is exact matched before we read it. */
+    ovs_assert(match->wc.masks.in_port.odp_port == ODPP_NONE);
+    odp_port_t in_port = match->flow.in_port.odp_port;
+
+    /* As we select the dpcls based on the port number, each netdev flow
+     * belonging to the same dpcls will have the same odp_port value.
+     * For performance reasons we wildcard odp_port here in the mask.  In the
+     * typical case dp_hash is also wildcarded, and the resulting 8-byte
+     * chunk {dp_hash, in_port} will be ignored by netdev_flow_mask_init() and
+     * will not be part of the subtable mask.
+     * This will speed up the hash computation during dpcls_lookup() because
+     * there is one less call to hash_add64() in this case. */
+    match->wc.masks.in_port.odp_port = 0;
+    netdev_flow_mask_init(&mask, match);
+    match->wc.masks.in_port.odp_port = ODPP_NONE;
+
+    /* Make sure wc does not have metadata. */
+    ovs_assert(!FLOWMAP_HAS_FIELD(&mask.mf.map, metadata)
+               && !FLOWMAP_HAS_FIELD(&mask.mf.map, regs));
+
+    /* Do not allocate extra space. */
+    flow = xmalloc(sizeof *flow - sizeof flow->cr.flow.mf + mask.len);
+    memset(&flow->stats, 0, sizeof flow->stats);
+    atomic_init(&flow->netdev_flow_get_result, 0);
+    memset(&flow->last_stats, 0, sizeof flow->last_stats);
+    memset(&flow->last_attrs, 0, sizeof flow->last_attrs);
+    flow->dead = false;
+    flow->batch = NULL;
+    flow->mark = INVALID_FLOW_MARK;
+    *CONST_CAST(unsigned *, &flow->pmd_id) = pmd->core_id;
+    *CONST_CAST(struct flow *, &flow->flow) = match->flow;
+    *CONST_CAST(ovs_u128 *, &flow->ufid) = *ufid;
+    ovs_refcount_init(&flow->ref_cnt);
+    ovsrcu_set(&flow->actions, dp_netdev_actions_create(actions, actions_len));
+
+    dp_netdev_get_mega_ufid(match, CONST_CAST(ovs_u128 *, &flow->mega_ufid));
+    netdev_flow_key_init_masked(&flow->cr.flow, &match->flow, &mask);
+
+    /* Select dpcls for in_port. Relies on in_port to be exact match. */
+    cls = dp_netdev_pmd_find_dpcls(pmd, in_port);
+    dpcls_insert(cls, &flow->cr, &mask);
+
+    ds_put_cstr(&extra_info, "miniflow_bits(");
+    FLOWMAP_FOR_EACH_UNIT (unit) {
+        if (unit) {
+            ds_put_char(&extra_info, ',');
+        }
+        ds_put_format(&extra_info, "%d",
+                      count_1bits(flow->cr.mask->mf.map.bits[unit]));
+    }
+    ds_put_char(&extra_info, ')');
+    flow->dp_extra_info = ds_steal_cstr(&extra_info);
+    ds_destroy(&extra_info);
+
+    cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
+                dp_netdev_flow_hash(&flow->ufid));
+    
+    #ifdef FASTNIC_OFFLOAD
+    if(of_meta->flow_size > OFFLOAD_THRE){
+            queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
+                          orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
+    }
+    #else
+    queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
+                          orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
+    #endif
+
+    if (OVS_UNLIKELY(!VLOG_DROP_DBG((&upcall_rl)))) {
+        struct ds ds = DS_EMPTY_INITIALIZER;
+        struct ofpbuf key_buf, mask_buf;
+        struct odp_flow_key_parms odp_parms = {
+            .flow = &match->flow,
+            .mask = &match->wc.masks,
+            .support = dp_netdev_support,
+        };
+
+        ofpbuf_init(&key_buf, 0);
+        ofpbuf_init(&mask_buf, 0);
+
+        odp_flow_key_from_flow(&odp_parms, &key_buf);
+        odp_parms.key_buf = &key_buf;
+        odp_flow_key_from_mask(&odp_parms, &mask_buf);
+
+        ds_put_cstr(&ds, "flow_add: ");
+        odp_format_ufid(ufid, &ds);
+        ds_put_cstr(&ds, " mega_");
+        odp_format_ufid(&flow->mega_ufid, &ds);
+        ds_put_cstr(&ds, " ");
+        odp_flow_format(key_buf.data, key_buf.size,
+                        mask_buf.data, mask_buf.size,
+                        NULL, &ds, false);
+        ds_put_cstr(&ds, ", actions:");
+        format_odp_actions(&ds, actions, actions_len, NULL);
+
+        VLOG_DBG("%s", ds_cstr(&ds));
+
+        ofpbuf_uninit(&key_buf);
+        ofpbuf_uninit(&mask_buf);
+
+        /* Add a printout of the actual match installed. */
+        struct match m;
+        ds_clear(&ds);
+        ds_put_cstr(&ds, "flow match: ");
+        miniflow_expand(&flow->cr.flow.mf, &m.flow);
+        miniflow_expand(&flow->cr.mask->mf, &m.wc.masks);
+        memset(&m.tun_md, 0, sizeof m.tun_md);
+        match_format(&m, NULL, &ds, OFP_DEFAULT_PRIORITY);
+
+        VLOG_DBG("%s", ds_cstr(&ds));
+
+        ds_destroy(&ds);
+    }
+
+    return flow;
+}
+#endif
 
 static int
 flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
@@ -6465,7 +6649,6 @@ pmd_thread_main(void *f_)
 {
     struct dp_netdev_pmd_thread *pmd = f_;
     struct pmd_perf_stats *s = &pmd->perf_stats;
-    struct fastnic_pmd_perf_stats *fastnic_s = &pmd->fastnic_stats;
     unsigned int lc = 0;
     struct polled_queue *poll_list;
     bool wait_for_reload = false;
@@ -6475,6 +6658,9 @@ pmd_thread_main(void *f_)
     int poll_cnt;
     int i;
     int process_packets = 0;
+    #ifdef FASTNIC_LOG
+    struct fastnic_pmd_perf_stats *fastnic_s = &pmd->fastnic_stats;
+    #endif
 
     poll_list = NULL;
 
@@ -6525,7 +6711,9 @@ reload:
 
     /* Protect pmd stats from external clearing while polling. */
     ovs_mutex_lock(&pmd->perf_stats.stats_mutex);
+    #ifdef FASTNIC_LOG
     ovs_mutex_lock(&pmd->fastnic_stats.stats_mutex);
+    #endif
     for (;;) {
         uint64_t rx_packets = 0, tx_packets = 0;
 
@@ -6603,8 +6791,10 @@ reload:
         pmd_perf_end_iteration(s, rx_packets, tx_packets,
                                pmd_perf_metrics_enabled(pmd));
     }
-    ovs_mutex_unlock(&pmd->fastnic_stats.stats_mutex);
     ovs_mutex_unlock(&pmd->perf_stats.stats_mutex);
+    #ifdef FASTNIC_LOG
+    ovs_mutex_unlock(&pmd->fastnic_stats.stats_mutex);
+    #endif
 
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);
     atomic_read_relaxed(&pmd->wait_for_reload, &wait_for_reload);

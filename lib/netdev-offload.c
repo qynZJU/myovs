@@ -298,8 +298,6 @@ fastnic_netdev_flow_get(struct netdev *netdev, struct match *match,
            : EOPNOTSUPP;
     #endif
 }
-#else
-#warning "FASTNIC_LOG is not defined"
 #endif
 
 

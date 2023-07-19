@@ -10,6 +10,8 @@
 #endif
 
 #define FASTNIC_LOG
+#define HW_FASTNIC_LOG
+#define OCT_FASTNIC_LOG
 
 enum fastnic_pmd_stat_type {
     OFFLOAD_CREATE_PMD, /* call queue_netdev_flow_put */
@@ -80,6 +82,16 @@ enum fastnic_offload_stat_type {
     OFFLOAD_DEL_RTE_FAIL, /**/
     OFFLOAD_DEL_API_OK_CYCLE, /*  cpu cycle when OFFLOAD_DEL_API_OK. below is the same*/
     OFFLOAD_DEL_API_FAIL_CYCLE,
+    
+    #ifdef OCT_FASTNIC_LOG
+    PUT_OK_TIME,
+    PUT_FAIL_TIME,
+    MOD_OK_TIME,
+    MOD_FAIL_TIME,
+    DEL_OK_TIME,
+    DEL_FAIL_TIME,
+    #endif
+
     FASTNIC_OFFLOAD_N_STATS
 };
 
@@ -160,8 +172,10 @@ extern struct fastnic_offload_perf_stats fastnic_offload_stats;
 
 void fastnic_pmd_perf_stats_init(struct fastnic_pmd_perf_stats *s);
 void fastnic_pmd_perf_start_pmditeration(struct fastnic_pmd_perf_stats *s);
+#ifdef HW_FASTNIC_LOG
 void fastnic_offload_perf_stats_init(struct fastnic_offload_perf_stats *s);
 void fastnic_offload_perf_start_offloaditeration(struct fastnic_offload_perf_stats *s);
+#endif
 void fastnic_reval_perf_stats_init(struct fastnic_revalidate_perf_stats *s);
 void fastnic_revel_perf_start_revaliteration(struct fastnic_revalidate_perf_stats *s);
 void fastnic_reval_perf_update_counters(struct fastnic_revalidate_perf_stats *s,

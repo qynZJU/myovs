@@ -5,6 +5,7 @@
 
 #define FASTNIC_OFFLOAD 1 //only support tcp & udp now
 #define FASTNIC_OFF_IGNO 1 //ignore emc, smc, cmap
+
 #define OFFLOAD_THRE 10 
 
 //qq 待施工
