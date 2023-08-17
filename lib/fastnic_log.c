@@ -23,6 +23,7 @@
 
 VLOG_DEFINE_THIS_MODULE(fastnic_log);
 
+#ifdef FASTNIC_LOG
 #ifdef HW_FASTNIC_LOG
 struct fastnic_offload_perf_stats fastnic_offload_stats = {
     .init = false,
@@ -832,3 +833,4 @@ print_reval_log(unsigned int revalidator_id,
 
     return 0;
 }
+#endif
