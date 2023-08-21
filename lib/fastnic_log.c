@@ -41,6 +41,7 @@ static void fastnic_pmd_perf_read_counters(const struct fastnic_pmd_perf_stats *
 static void fastnic_pmd_sta(struct dp_netdev_pmd_thread *pmd);
 static void fastnic_reval_perf_stats_clear_lock(struct fastnic_revalidate_perf_stats *s);
 static void fastnic_reval_perf_stats_clear(struct fastnic_revalidate_perf_stats *s);
+static uint64_t fastnic_reval_perf_read_counter(const struct fastnic_revalidate_perf_stats *s, enum fastnic_revalidate_stat_type counter);
 static void fastnic_reval_perf_read_counters(const struct fastnic_revalidate_perf_stats *s,
                                              uint64_t stats[FASTNIC_REVALIDATE_N_STATS]);
 static void fastnic_reval_sta(unsigned int revalidator_thread_id,
@@ -389,6 +390,19 @@ OVS_REQUIRES(s->stats_mutex)
         /* Clear the PMD stats before starting next iteration. */
         fastnic_pmd_perf_stats_clear_lock(s);
     }
+}
+
+static uint64_t fastnic_reval_perf_read_counter(const struct fastnic_revalidate_perf_stats *s, enum fastnic_revalidate_stat_type counter) {
+    uint64_t val;
+    
+    atomic_read_relaxed(&s->counters.n[counter], &val);
+    if (val > s->counters.zero[counter]) {
+        val = val - s->counters.zero[counter];
+    } else {
+        val = 0;
+    }
+
+    return val;
 }
 
 //change from lib/dpif-netdev-perf.c: pmd_perf_read_counters
@@ -826,9 +840,11 @@ int
 print_reval_log(unsigned int revalidator_id,
                 struct fastnic_revalidate_perf_stats *perf_stats)
 {
-    fastnic_reval_sta(revalidator_id, perf_stats);
-    fastnic_reval_perf_stats_clear(perf_stats);
-    perf_stats->measure_cnt++;
+    if (fastnic_reval_perf_read_counter(perf_stats,OFFLOAD_FLOW_NUM) > 0) {
+        fastnic_reval_sta(revalidator_id, perf_stats);
+        fastnic_reval_perf_stats_clear(perf_stats);
+        perf_stats->measure_cnt++;
+    }
 
     return 0;
 }
