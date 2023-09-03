@@ -4,7 +4,7 @@
 #include "flow.h"
 
 #define FASTNIC_OFFLOAD 1 //only support tcp & udp now
-#define FASTNIC_OFF_IGNO 1 //ignore emc, smc, cmap
+#define OFFLOAD_META 1 //define meta_data for offloading and read it from packets
 
 #define OFFLOAD_THRE 10 
 
