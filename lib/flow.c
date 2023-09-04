@@ -1113,7 +1113,6 @@ miniflow_extract(struct dp_packet *packet, struct miniflow *dst)
     dst->map = mf.map;
 }
 
-
 #ifdef OFFLOAD_META
 void
 fastnic_miniflow_extract(struct dp_packet *packet, struct miniflow *dst, struct offload_meta *of_meta)
@@ -1476,9 +1475,9 @@ fastnic_miniflow_extract(struct dp_packet *packet, struct miniflow *dst, struct 
     #ifdef OFFLOAD_META
     if (nw_proto == IPPROTO_TCP || nw_proto == IPPROTO_UDP){
         const struct offload_meta *ofm = data;
-        packet->of_meta.flow_size = htonl(ofm->flow_size);   
-        packet->of_meta.pkt_seq = htonl(ofm->pkt_seq);   
-        packet->of_meta.timestamp = htobe64(ofm->timestamp);   
+        of_meta->flow_size = htonl(ofm->flow_size);   
+        of_meta->pkt_seq = htonl(ofm->pkt_seq);   
+        of_meta->flow_size = htobe64(ofm->timestamp);   
     }
     #endif
  out:

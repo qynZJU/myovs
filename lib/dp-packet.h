@@ -121,9 +121,6 @@ struct dp_packet {
     uint32_t rss_hash;          /* Packet hash. */
     uint32_t flow_mark;         /* Packet flow mark. */
 #endif
-#ifdef OFFLOAD_META
-    struct offload_meta of_meta;
-#endif
     enum dp_packet_source source;  /* Source of memory allocated as 'base'. */
 
     /* All the following elements of this struct are copied in a single call

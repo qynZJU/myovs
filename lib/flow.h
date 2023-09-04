@@ -542,7 +542,7 @@ struct pkt_metadata;
  * 'dst->map' is ignored on input and set on output to indicate which fields
  * were extracted. */
 void miniflow_extract(struct dp_packet *packet, struct miniflow *dst);
-#ifdef FASTNIC_OFFLOAD
+#ifdef OFFLOAD_META
 void fastnic_miniflow_extract(struct dp_packet *packet, struct miniflow *dst, struct offload_meta *of_meta);
 #endif
 void miniflow_map_init(struct miniflow *, const struct flow *);
