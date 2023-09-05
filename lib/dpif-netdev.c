@@ -7611,7 +7611,7 @@ smc_lookup_batch(struct dp_netdev_pmd_thread *pmd,
                     /* SMC hit and emc miss, we insert into EMC */
                     keys[i].len =
                         netdev_flow_key_size(miniflow_n_values(&keys[i].mf));
-                    #ifdef FASTNIC_OFFLOAD
+                    #ifdef EMC_ALLIN
                     emc_insert(&(pmd->flow_cache).emc_cache, &keys[i], flow);
                     #else
                     emc_probabilistic_insert(pmd, &keys[i], flow);
@@ -7838,7 +7838,7 @@ dfc_processing(struct dp_netdev_pmd_thread *pmd,
                 : dpif_netdev_packet_get_rss_hash(packet, &key->mf);
 
         /* If EMC is disabled skip emc_lookup */
-        #ifdef FASTNIC_OFFLOAD
+        #ifdef EMC_EXPAND
         uint64_t pkt_seq;
         flow = (cur_min != 0) ? fastnic_emc_lookup(&cache->emc_cache, key, &pkt_seq) : NULL;
         #else
@@ -7979,7 +7979,7 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
         ovs_mutex_unlock(&pmd->flow_mutex);
         uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
         smc_insert(pmd, key, hash);
-        #ifdef FASTNIC_OFFLOAD
+        #ifdef EMC_ALLIN
         emc_insert(&(pmd->flow_cache).emc_cache, key, netdev_flow);
         #else
         emc_probabilistic_insert(pmd, key, netdev_flow);
@@ -8094,7 +8094,7 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
         flow = dp_netdev_flow_cast(rules[i]);
         uint32_t hash =  dp_netdev_flow_hash(&flow->ufid);
         smc_insert(pmd, keys[i], hash);
-        #ifdef FASTNIC_OFFLOAD
+        #ifdef EMC_ALLIN
         emc_insert(&(pmd->flow_cache).emc_cache, keys[i], flow);
         #else
         emc_probabilistic_insert(pmd, keys[i], flow);

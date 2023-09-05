@@ -63,7 +63,7 @@ extern "C" {
  * cache.
  * If dp_netdev_input is not called from a pmd thread, a mutex is used.
  */
-#ifdef FASTNIC_OFFLOAD
+#ifdef EMC_EXPAND
 #define EM_FLOW_HASH_SHIFT 16
 #else
 #define EM_FLOW_HASH_SHIFT 13
@@ -96,7 +96,7 @@ struct dpcls_rule;
 struct emc_entry {
     struct dp_netdev_flow *flow;
     struct netdev_flow_key key;   /* key.hash used for emc hash value. */
-    #ifdef FASTNIC_OFFLOAD
+    #ifdef EMC_EXPAND
     uint64_t counter;
     #endif
 };
@@ -171,7 +171,7 @@ emc_lookup(struct emc_cache *cache, const struct netdev_flow_key *key)
     return NULL;
 }
 
-#ifdef FASTNIC_OFFLOAD
+#ifdef EMC_EXPAND
 static inline struct dp_netdev_flow *
 fastnic_emc_lookup(struct emc_cache *cache, const struct netdev_flow_key *key, uint64_t *pkt_seq)
 {
@@ -181,7 +181,7 @@ fastnic_emc_lookup(struct emc_cache *cache, const struct netdev_flow_key *key, u
         if (current_entry->key.hash == key->hash
             && emc_entry_alive(current_entry)
             && emc_flow_key_equal_mf(&current_entry->key, &key->mf)) {
-            #ifdef FASTNIC_OFFLOAD
+            #ifdef EMC_EXPAND
             current_entry->counter++;
             *pkt_seq = current_entry->counter;
             #endif
