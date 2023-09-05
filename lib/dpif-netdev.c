@@ -3880,8 +3880,15 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
                 dp_netdev_flow_hash(&flow->ufid));
 
+    #ifdef FASTNIC_OFFLOAD
+    if(OFFLOAD_THRE == 1){
+        queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
+                              orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
+    }
+    #else
     queue_netdev_flow_put(pmd, flow, match, actions, actions_len,
                           orig_in_port, DP_NETDEV_FLOW_OFFLOAD_OP_ADD);
+    #endif
 
     if (OVS_UNLIKELY(!VLOG_DROP_DBG((&upcall_rl)))) {
         struct ds ds = DS_EMPTY_INITIALIZER;
@@ -7963,19 +7970,11 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
          * to be locking revalidators out of making flow modifications. */
         ovs_mutex_lock(&pmd->flow_mutex);
         netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL);
-        #ifdef FASTNIC_OFFLOAD
-        if (OVS_LIKELY(!netdev_flow) && OFFLOAD_THRE == 1) {
-            netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid,
-                                             add_actions->data,
-                                             add_actions->size, orig_in_port);
-        }
-        #else
         if (OVS_LIKELY(!netdev_flow)) {
             netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid,
                                              add_actions->data,
                                              add_actions->size, orig_in_port);
         }
-        #endif
         ovs_mutex_unlock(&pmd->flow_mutex);
         uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
         smc_insert(pmd, key, hash);
