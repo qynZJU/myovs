@@ -30,7 +30,7 @@ struct fastnic_offload_perf_stats fastnic_offload_stats = {
 };
 #endif
 
-static void now_time_log(pthread_t thread_id);
+// static void now_time_log(pthread_t thread_id);
 static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_stat_type counter);
 static void one_pmd_sta(struct dp_netdev_pmd_thread *pmd);
 static void one_pmd_show_rxq(struct dp_netdev_pmd_thread *pmd);
@@ -56,18 +56,18 @@ static void fastnic_offload_perf_read_counters(const struct fastnic_offload_perf
 static void fastnic_offload_sta(void);
 #endif
 
-static void
-now_time_log(pthread_t thread_id){
-    struct timeval tv;
-    struct tm tzone;
-    char datetime[20];
+// static void
+// now_time_log(pthread_t thread_id){
+//     struct timeval tv;
+//     struct tm tzone;
+//     char datetime[20];
 
-    gettimeofday(&tv, NULL);
-    localtime_r(&tv.tv_sec, &tzone);
-    strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", &tzone);
+//     gettimeofday(&tv, NULL);
+//     localtime_r(&tv.tv_sec, &tzone);
+//     strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", &tzone);
     
-    VLOG_INFO("thread %ld, start dump at %s, accurate time as %lds-%ldus",thread_id, datetime, tv.tv_sec, tv.tv_usec);
-}
+//     VLOG_INFO("thread %ld, start dump at %s, accurate time as %lds-%ldus",thread_id, datetime, tv.tv_sec, tv.tv_usec);
+// }
 
 static uint64_t pmd_perf_read_counter(const struct pmd_perf_stats *s, enum pmd_stat_type counter) {
     uint64_t val;
@@ -789,11 +789,12 @@ fastnic_reval_sta(unsigned int revalidator_thread_id,
 
 //change from lib/dpif-netdev.c:dpif_netdev_pmd_info
 int
-print_log(pthread_t revalidator_thread_id)
+// print_log(pthread_t revalidator_thread_id )
+print_log(void)
 {
     /* print detection time to ovs default log,
      * the default print interval is 0.5s */
-    now_time_log(revalidator_thread_id); 
+    // now_time_log(revalidator_thread_id); 
 
     struct dp_netdev_pmd_thread **pmd_list;
     size_t n;

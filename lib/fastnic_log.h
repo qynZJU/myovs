@@ -180,7 +180,7 @@ void fastnic_reval_perf_stats_init(struct fastnic_revalidate_perf_stats *s);
 void fastnic_revel_perf_start_revaliteration(struct fastnic_revalidate_perf_stats *s);
 void fastnic_reval_perf_update_counters(struct fastnic_revalidate_perf_stats *s,
                                    struct fastnic_perflow_perf_stats *flow_query);
-int print_log(pthread_t revalidator_thread_id);
+int print_log(void);
 int print_reval_log(unsigned int revalidator_id,
                     struct fastnic_revalidate_perf_stats *perf_stats);
 

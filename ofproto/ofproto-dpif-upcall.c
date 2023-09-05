@@ -1000,9 +1000,8 @@ udpif_revalidator(void *arg)
         fastnic_revalidate(revalidator,&fn_reval_stats);
         print_reval_log(revalidator->id,&fn_reval_stats);
         if(leader){
-            print_log(revalidator->thread);
-            // VLOG_INFO("already offloading %ld flows (%ld failed), deleting %ld flows (%ld failed), remained %ld flows",
-            //           flow_create_num, flow_create_fail_num, flow_destroy_num, flow_destroy_fail_num, flow_create_num-flow_destroy_num);
+            // print_log(revalidator->thread);
+            print_log();
         }
         #else
         revalidate(revalidator);
