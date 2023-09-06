@@ -17,4 +17,6 @@ struct offload_meta {
     uint64_t timestamp;
 };
 
+int fastnic_wc_parse(struct flow_wildcards *wc, struct flow *flow);
+
 #endif /* FASTNIC_LOG_H */
