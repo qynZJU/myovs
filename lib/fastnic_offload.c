@@ -2,15 +2,64 @@
 
 #include "fastnic_offload.h"
 
-#include "ofproto/netflow.h"
-#include "ofproto/tunnel.h"
 #include "openvswitch/match.h"
 #include "dpif-netdev-private-flow.h"
 #include "dpif-netdev-private-thread.h"
 #include "odp-util.h"
+#include "packets.h" 
+#include "flow.h"
 /* Generate wildcard for flows, but not fairly sure about whether it is right.
  * Since the wildcard in ovs will perform the function to insert into dpcls, 
  * which have a complex wildcard generate rules. just use it temporarily */
+
+static void
+netflow_mask_wc(const struct flow *flow, struct flow_wildcards *wc)
+{
+    if (flow->dl_type != htons(ETH_TYPE_IP)) {
+        return;
+    }
+    memset(&wc->masks.nw_proto, 0xff, sizeof wc->masks.nw_proto);
+    memset(&wc->masks.nw_src, 0xff, sizeof wc->masks.nw_src);
+    memset(&wc->masks.nw_dst, 0xff, sizeof wc->masks.nw_dst);
+    flow_unwildcard_tp_ports(flow, wc);
+    wc->masks.nw_tos |= IP_DSCP_MASK;
+}
+
+/* Returns true if 'flow' should be submitted to tnl_port_receive(). */
+static inline bool
+tnl_port_should_receive(const struct flow *flow)
+{
+    return flow_tnl_dst_is_set(&flow->tunnel);
+}
+
+static void
+tnl_wc_init(struct flow *flow, struct flow_wildcards *wc)
+{
+    if (tnl_port_should_receive(flow)) {
+        wc->masks.tunnel.tun_id = OVS_BE64_MAX;
+        if (flow->tunnel.ip_dst) {
+            wc->masks.tunnel.ip_src = OVS_BE32_MAX;
+            wc->masks.tunnel.ip_dst = OVS_BE32_MAX;
+        } else {
+            wc->masks.tunnel.ipv6_src = in6addr_exact;
+            wc->masks.tunnel.ipv6_dst = in6addr_exact;
+        }
+        wc->masks.tunnel.flags = (FLOW_TNL_F_DONT_FRAGMENT |
+                                  FLOW_TNL_F_CSUM |
+                                  FLOW_TNL_F_KEY);
+        wc->masks.tunnel.ip_tos = UINT8_MAX;
+        wc->masks.tunnel.ip_ttl = 0;
+        /* The tp_src and tp_dst members in flow_tnl are set to be always
+         * wildcarded, not to unwildcard them here. */
+        wc->masks.tunnel.tp_src = 0;
+        wc->masks.tunnel.tp_dst = 0;
+
+        if (is_ip_any(flow)
+            && IP_ECN_is_ce(flow->tunnel.ip_tos)) {
+            wc->masks.nw_tos |= IP_ECN_MASK;
+        }
+    }
+}
 
 /*change from xlate_wc_init(struct xlate_ctx *ctx)*/
 static inline int
