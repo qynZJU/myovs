@@ -7720,7 +7720,7 @@ fastnic_off_flow_add(struct dp_netdev_pmd_thread *pmd,
     match.tun_md.valid = false;
     memcpy(&match.flow, &flow->flow, sizeof(struct flow));
     memset(&match.wc, 0, sizeof match.wc);
-    flow_wildcards_init_for_packet(&match.wc, &match.flow);
+    fastnic_wc_parse(&match.wc, &match.flow);
 
     /* Make sure in_port is exact matched before we read it. */
     ovs_assert(match.wc.masks.in_port.odp_port == ODPP_NONE);
