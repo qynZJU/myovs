@@ -2665,12 +2665,6 @@ dp_netdev_flow_offload_main(void *data OVS_UNUSED)
     const char *op;
     int ret;
 
-    #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
-    if (OVS_UNLIKELY(fastnic_offload_stats.init == false)){
-        fastnic_offload_perf_stats_init(&fastnic_offload_stats);
-    }
-    #endif
-
     for (;;) {
         #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
         fastnic_offload_perf_start_offloaditeration(&fastnic_offload_stats);
@@ -7274,6 +7268,11 @@ dp_netdev_configure_pmd(struct dp_netdev_pmd_thread *pmd, struct dp_netdev *dp,
     pmd_perf_stats_init(&pmd->perf_stats);
     #ifdef FASTNIC_LOG
     fastnic_pmd_perf_stats_init(&pmd->fastnic_stats);
+    #endif
+    #if defined(FASTNIC_LOG) && defined(HW_FASTNIC_LOG)
+    if (OVS_UNLIKELY(fastnic_offload_stats.init == false)){
+        fastnic_offload_perf_stats_init(&fastnic_offload_stats);
+    }
     #endif
     cmap_insert(&dp->poll_threads, CONST_CAST(struct cmap_node *, &pmd->node),
                 hash_int(core_id, 0));
