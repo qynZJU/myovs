@@ -715,6 +715,8 @@ fastnic_reval_perf_update_counters(struct fastnic_revalidate_perf_stats *s,
         }
     }else if (flow_query->flow_type == SOFTWARE_FLOW){
         fastnic_reval_update_counter(s, SOFTWARE_FLOW_NUM, 1);
+        fastnic_reval_update_counter(s, SOFTWARE_FLOW_PKTS, flow_query->flow_offload_query.hits);
+        fastnic_reval_update_counter(s, SOFTWARE_FLOW_BYTES, flow_query->flow_offload_query.bytes);
     }else if (flow_query->flow_type == DUMPFAIL_FLOW){
         fastnic_reval_update_counter(s, DUMPFAIL_FLOW_NUM, 1);
     }else if (flow_query->flow_type == EMPTY_FLOW){
@@ -840,7 +842,7 @@ int
 print_reval_log(unsigned int revalidator_id,
                 struct fastnic_revalidate_perf_stats *perf_stats)
 {
-    if (fastnic_reval_perf_read_counter(perf_stats,OFFLOAD_FLOW_NUM) > 0) {
+    if (fastnic_reval_perf_read_counter(perf_stats,OFFLOAD_FLOW_NUM) > 0 || fastnic_reval_perf_read_counter(perf_stats,SOFTWARE_FLOW_NUM) > 0) {
         fastnic_reval_sta(revalidator_id, perf_stats);
         fastnic_reval_perf_stats_clear(perf_stats);
         perf_stats->measure_cnt++;
