@@ -767,7 +767,9 @@ fastnic_reval_sta(unsigned int revalidator_thread_id,
         fp = fopen(fastnic_reval_stats_file, "a+");
         fprintf(fp, "measure_cnt,timestamp,interval/ms,reval_id,\
                     offload_flow_num,offload_pkt_num,offload_bytes,\
-                    offload_nonsta_flow_num,software_flow_num,dumpfail_flow_num,empty_flow\r\n");
+                    offload_nonsta_flow_num,\
+                    software_flow_num,software_flow_pkts,software_flow_bytes\
+                    dumpfail_flow_num,empty_flow\r\n");
     } else {
         fp = fopen(fastnic_reval_stats_file, "a+");
     }
@@ -784,6 +786,8 @@ fastnic_reval_sta(unsigned int revalidator_thread_id,
     fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_FLOW_BYTES]); 
     fprintf(fp, "%"PRIu64",", stats_reval[OFFLOAD_NONSAVE_FLOW_NUM]); 
     fprintf(fp, "%"PRIu64",", stats_reval[SOFTWARE_FLOW_NUM]); 
+    fprintf(fp, "%"PRIu64",", stats_reval[SOFTWARE_FLOW_PKTS]); 
+    fprintf(fp, "%"PRIu64",", stats_reval[SOFTWARE_FLOW_BYTES]); 
     fprintf(fp, "%"PRIu64",", stats_reval[DUMPFAIL_FLOW_NUM]); 
     fprintf(fp, "%"PRIu64"\r\n", stats_reval[EMPTY_FLOW_NUM]); 
     fclose(fp);
